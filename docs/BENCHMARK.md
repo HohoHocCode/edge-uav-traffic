@@ -37,9 +37,13 @@ Measured on VisDrone val at the AP protocol (`conf 0.001`), heavy rain raises
 structure that scores above 0.001, so more candidates reach NMS.
 
 Measured on the demo clip at the deployment threshold (`conf 0.25`), the same
-condition *lowers* NMS cost from 3.1 to 1.8 ms (−37%), because rain pushes
+condition *lowers* NMS cost from 3.2 to 1.8 ms (−44%), because rain pushes
 confidences below 0.25 and the boxes never reach NMS at all. Detections fall
-64.7 → 30.1 per frame over the same footage.
+64.7 → 30.1 per frame over the same footage — 46.6% retained.
+
+Per-frame evidence: [`docs/results/compare_rain_heavy.csv`](results/compare_rain_heavy.csv)
+(300 frames, both panes, same model hash and thresholds), produced by
+`scripts/make_comparison_video.py`.
 
 Both numbers are real and they are not in conflict — they measure different
 operating points. The consequence for deployment is the uncomfortable one:
@@ -65,8 +69,12 @@ reported tail is one that actually occurs.
 
 Ten conditions, defined in `2-augment/degradations.py` and frozen in
 `CONDITIONS`. Each is seeded from the image index, so the degraded set is
-byte-identical across runs and machines — this is what makes the robustness
-table reproducible rather than merely repeatable.
+byte-identical across runs **on the same OpenCV build**. Across builds it is
+deterministic but not bit-exact: `GaussianBlur`, `INTER_CUBIC` and float32
+reductions can differ by an ULP or two depending on which SIMD path OpenCV was
+compiled for. The differences are far below the level that moves an AP figure,
+but "byte-identical across machines" would be an overclaim, so pin the OpenCV
+version alongside the seed when a result has to be reproduced exactly.
 
 | id | Models |
 |---|---|

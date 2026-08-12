@@ -29,6 +29,10 @@ from urllib.parse import parse_qs, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+#: Largest accepted /ingest body. A node posts batches of <= 64 frame rows,
+#: so 8 MB is generous by two orders of magnitude.
+MAX_BODY_BYTES = 8 * 1024 * 1024
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ingest (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,6 +213,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _limit(q: dict, default: int, cap: int = 5000) -> int:
+        """Parse a ?limit= value defensively.
+
+        A non-numeric value used to raise ValueError inside the handler and
+        return a 500; an unbounded one let a single request pull the whole
+        table into memory.
+        """
+        raw = (q.get("limit") or [str(default)])[0]
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            return default
+        return max(1, min(n, cap))
+
     def do_GET(self) -> None:
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -219,11 +238,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self.store.state())
         elif u.path == "/api/timeseries":
             self._json(self.store.timeseries(
-                (q.get("session") or [None])[0],
-                int((q.get("limit") or [240])[0]),
+                (q.get("session") or [None])[0], self._limit(q, 240),
             ))
         elif u.path == "/api/events":
-            self._json(self.store.events(int((q.get("limit") or [40])[0])))
+            self._json(self.store.events(self._limit(q, 40, cap=1000)))
         elif u.path == "/health":
             self._json({"ok": True, "t": time.time()})
         else:
@@ -235,10 +253,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            n = int(self.headers.get("Content-Length", 0))
+            n = int(self.headers.get("Content-Length", 0) or 0)
+        except (TypeError, ValueError):
+            self._json({"ok": False, "error": "bad Content-Length"}, 400)
+            return
+        if n < 0 or n > MAX_BODY_BYTES:
+            # Without a cap, one client claiming a 4 GB body makes the server
+            # allocate it. The node posts batches of at most 64 frame rows.
+            self._json({"ok": False, "error": "payload too large"}, 413)
+            return
+        try:
             payload = json.loads(self.rfile.read(n) or b"{}")
         except (ValueError, json.JSONDecodeError) as exc:
             self._json({"ok": False, "error": str(exc)}, 400)
+            return
+        if not isinstance(payload, dict):
+            self._json({"ok": False, "error": "expected a JSON object"}, 400)
             return
         try:
             written = self.store.ingest(payload)
@@ -265,6 +295,15 @@ def main() -> int:
     Handler.store = Store(os.path.abspath(args.db))
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+    if args.host in ("0.0.0.0", "::"):
+        print("[command post] WARNING: listening on all interfaces with no "
+              "authentication.\n"
+              "               Anyone on this network can post telemetry and "
+              "read the dashboard.\n"
+              "               Intended for a trusted lab LAN or a demo. Use "
+              "--host 127.0.0.1,\n"
+              "               or put a reverse proxy with auth in front, for "
+              "anything else.")
     print(f"[command post] dashboard  http://{shown}:{args.port}/")
     print(f"[command post] ingest     http://{shown}:{args.port}/ingest")
     print(f"[command post] db         {os.path.abspath(args.db)}")

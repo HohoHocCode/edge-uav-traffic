@@ -39,7 +39,7 @@ import viz  # noqa: E402
 from detector import Yolov8Detector  # noqa: E402
 from runtime import create_session  # noqa: E402
 from telemetry import TelemetryConfig, TelemetrySink  # noqa: E402
-from tracker import ByteTrack  # noqa: E402
+from tracker import ByteTrack, detections_as_tracks  # noqa: E402
 
 
 def load_yaml(path: str) -> dict:
@@ -141,6 +141,15 @@ def main(argv=None) -> int:
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
     src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
+
+    resize_to = cfg["capture"].get("resize_input")
+    if resize_to:
+        src_w, src_h = int(resize_to[0]), int(resize_to[1])
+        print(f"[info] resizing capture to {src_w}x{src_h}")
+    target_fps = float(cfg["capture"].get("target_fps") or 0)
+    min_period = 1.0 / target_fps if target_fps > 0 else 0.0
+    if min_period:
+        print(f"[info] capping processing at {target_fps:.1f} fps")
     print(f"[info] source={source!r} {src_w}x{src_h} @ {src_fps:.1f} fps")
 
     # ---- telemetry ----------------------------------------------------
@@ -189,9 +198,13 @@ def main(argv=None) -> int:
 
     try:
         while True:
+            loop_start = time.perf_counter()
             ok, frame = cap.read()
             if not ok:
                 break
+            if resize_to:
+                frame = cv2.resize(frame, (src_w, src_h),
+                                   interpolation=cv2.INTER_AREA)
             if degrade_fn is not None:
                 frame = degrade_fn(frame, frame_id)
 
@@ -200,8 +213,11 @@ def main(argv=None) -> int:
             t0 = time.perf_counter()
             if tracker is not None:
                 tracks = tracker.update(dets.xyxy, dets.conf, dets.cls)
-            else:  # detection-only mode still needs a track-like object
-                tracks = []
+            else:
+                # Detection-only mode. Wrapping the detections keeps every
+                # count meaningful; returning [] would make the run look like
+                # an empty scene instead of an untracked one.
+                tracks = detections_as_tracks(dets.xyxy, dets.conf, dets.cls)
             track_ms = (time.perf_counter() - t0) * 1000.0
 
             ts_ms = (time.perf_counter() - t_start) * 1000.0
@@ -238,6 +254,10 @@ def main(argv=None) -> int:
             frame_id += 1
             if args.max_frames and frame_id >= args.max_frames:
                 break
+            if min_period:
+                slack = min_period - (time.perf_counter() - loop_start)
+                if slack > 0:
+                    time.sleep(slack)
     except KeyboardInterrupt:
         print("\n[info] interrupted")
     finally:

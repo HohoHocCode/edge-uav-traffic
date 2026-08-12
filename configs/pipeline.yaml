@@ -32,8 +32,10 @@ tracker:
 
 analytics:
   enabled: true
-  # Task 5 — crowd/vehicle counting. Counts are reported per frame and per ROI.
-  count_interval_s: 1.0
+  # A track whose centroid moves more than this fraction of the frame in one
+  # frame is treated as an association error, not motion, and cannot register
+  # a line crossing.
+  max_step_norm: 0.25
   # Regions of interest, normalised [x1, y1, x2, y2] in 0..1 of the frame.
   rois:
     - name: intersection
@@ -49,6 +51,9 @@ analytics:
     vehicle_classes: [car, van, truck, bus, motor, tricycle, awning-tricycle]
     warn_count: 25
     alert_count: 45
+    # Consecutive frames that must agree on the *same* new level before the
+    # reported level moves.
+    hysteresis: 5
 
 telemetry:
   enabled: true
@@ -61,8 +66,13 @@ telemetry:
 
 capture:
   source: 0                # int (camera index) | path to video | rtsp url
-  target_fps: 0            # 0 = as fast as possible
-  resize_input: null       # null = native
+  # Cap the processing rate. 0 = as fast as the source allows. Useful on the
+  # board to hold a fixed duty cycle instead of thermally throttling.
+  target_fps: 0
+  # Downscale every captured frame before the pipeline, as [width, height].
+  # null = keep the native resolution. Affects pre_ms and post_ms, never the
+  # model input size, which is fixed by model.imgsz.
+  resize_input: null
 
 overlay:
   enabled: true

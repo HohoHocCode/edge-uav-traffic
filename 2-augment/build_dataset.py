@@ -29,8 +29,10 @@ upload — at the cost of having no clean/degraded pairs.
 Reproducibility
 ---------------
 Every assignment is derived from ``--seed`` and the image index, and the full
-mapping is written to ``manifest.csv``. Regenerating with the same seed gives
-byte-identical output.
+mapping is written to ``manifest.csv``. Regenerating with the same seed on the
+same OpenCV build reproduces the output exactly; across OpenCV builds the
+assignment is identical but the pixels can differ by an ULP or two, since
+``GaussianBlur`` and the resize kernels take different SIMD paths.
 """
 
 from __future__ import annotations

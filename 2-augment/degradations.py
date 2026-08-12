@@ -2,8 +2,13 @@
 
 Every degradation is a pure function ``(BGR uint8 image, severity) -> BGR uint8``
 and is seeded from the image index, so the same source frame always produces the
-same degraded frame across runs and across machines. That determinism is what
-makes the robustness table reproducible.
+same degraded frame from one run to the next. That determinism is what makes the
+robustness table reproducible.
+
+Scope of that guarantee: bit-exact for a given OpenCV build, deterministic but
+not necessarily bit-exact across builds, because ``GaussianBlur``, the resize
+kernels and float32 reductions may take different SIMD paths. Pin the OpenCV
+version alongside the seed if a result must be reproduced exactly.
 
 The severities are frozen in ``CONDITIONS`` below. Do not tune them after
 looking at results.

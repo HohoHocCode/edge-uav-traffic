@@ -117,6 +117,49 @@ class Track:
             self.history.pop(0)
 
 
+class PseudoTrack:
+    """A detection wearing a track's interface, for tracker-disabled runs.
+
+    With ``tracker.enabled: false`` the analytics layer still has to receive
+    something track-shaped, otherwise every count silently reads zero and the
+    run looks like an empty scene rather than a detection-only scene.
+
+    ``track_id`` is **negative and per-frame**: it is the object's index in
+    this frame's detection list, not an identity. Index 1 in consecutive
+    frames is generally two unrelated objects. The negative sign is the
+    contract that tells :class:`~analytics.TrafficAnalytics` to exclude these
+    from line crossing, which is only meaningful for a persistent identity.
+    Per-frame and per-ROI counts remain valid.
+    """
+
+    __slots__ = ("track_id", "cls", "conf", "_box", "history", "state",
+                 "hits", "time_since_update")
+
+    def __init__(self, box: np.ndarray, cls: int, conf: float, idx: int) -> None:
+        self._box = np.asarray(box, dtype=np.float32)
+        self.cls = int(cls)
+        self.conf = float(conf)
+        self.track_id = -(idx + 1)          # negative: not a real identity
+        self.history: list[tuple[float, float]] = []
+        self.state = "tracked"
+        self.hits = 1
+        self.time_since_update = 0
+
+    @property
+    def box(self) -> np.ndarray:
+        return self._box
+
+    @property
+    def centroid(self) -> tuple[float, float]:
+        x1, y1, x2, y2 = self._box
+        return (float(x1 + x2) / 2.0, float(y1 + y2) / 2.0)
+
+
+def detections_as_tracks(xyxy: np.ndarray, conf: np.ndarray,
+                         cls: np.ndarray) -> list[PseudoTrack]:
+    return [PseudoTrack(xyxy[i], cls[i], conf[i], i) for i in range(len(xyxy))]
+
+
 class ByteTrack:
     """Two-stage IoU tracker.
 

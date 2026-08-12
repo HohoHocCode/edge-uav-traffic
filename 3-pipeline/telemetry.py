@@ -77,6 +77,11 @@ class TelemetryConfig:
     post_url: str = ""
     post_interval_s: float = 2.0
     session_id: str = ""
+    #: Rows between SQLite commits. An uncommitted transaction is lost on
+    #: power failure, which on a drone is the expected way for a run to end.
+    commit_every: int = 30
+    #: Seconds between commits when frames arrive slower than commit_every.
+    commit_interval_s: float = 1.0
 
 
 class TelemetrySink:
@@ -91,6 +96,10 @@ class TelemetrySink:
 
         # SQLite. check_same_thread=False because the uploader thread reads it.
         self.conn = sqlite3.connect(cfg.local_db, check_same_thread=False)
+        # WAL survives an abrupt process death far better than the rollback
+        # journal, and lets the commit cadence below stay cheap.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
         self.conn.execute(
             "INSERT OR REPLACE INTO sessions "
@@ -108,12 +117,19 @@ class TelemetrySink:
         )
         self.conn.commit()
         self._db_lock = threading.Lock()
+        self._uncommitted = 0
+        self._last_commit = time.time()
 
-        # CSV — header written lazily on the first row so the column set can
-        # include the ROI/line columns, which depend on the config.
+        # CSV — the header is locked on the first row, so the first row must
+        # already carry every column the session will ever produce.
+        # TrafficAnalytics guarantees that by seeding all classes, ROIs and
+        # lines at zero; the guard in write() catches it if that ever stops
+        # being true, rather than silently dropping the column.
         self._csv_file = open(cfg.csv_path, "w", newline="", encoding="utf-8") \
             if cfg.csv_path else None
         self._csv_writer: csv.DictWriter | None = None
+        self._csv_fields: list[str] = []
+        self.dropped_columns: set[str] = set()
 
         # Uploader
         self._q: queue.Queue = queue.Queue(maxsize=512)
@@ -134,10 +150,20 @@ class TelemetrySink:
 
         if self._csv_file is not None:
             if self._csv_writer is None:
+                self._csv_fields = list(row.keys())
                 self._csv_writer = csv.DictWriter(
-                    self._csv_file, fieldnames=list(row.keys()), extrasaction="ignore"
+                    self._csv_file, fieldnames=self._csv_fields,
+                    extrasaction="ignore",
                 )
                 self._csv_writer.writeheader()
+            else:
+                # extrasaction="ignore" is what makes a late-appearing column
+                # vanish without a trace. Record it instead: the CSV is the
+                # benchmark's raw record and losing a column silently would
+                # corrupt the evidence rather than merely the file.
+                extra = set(row) - set(self._csv_fields)
+                if extra:
+                    self.dropped_columns |= extra
             self._csv_writer.writerow(row)
             self._csv_file.flush()
 
@@ -164,15 +190,29 @@ class TelemetrySink:
                     json.dumps(row, default=str),
                 ),
             )
+            self._uncommitted += 1
+            now = time.time()
+            if (self._uncommitted >= self.cfg.commit_every
+                    or now - self._last_commit >= self.cfg.commit_interval_s):
+                self.conn.commit()
+                self._uncommitted = 0
+                self._last_commit = now
 
         if self.cfg.post_url:
             try:
                 self._q.put_nowait(row)
             except queue.Full:
-                # Uplink is slower than the pipeline. Dropping the oldest
-                # telemetry is correct: fresh state matters more than a
-                # complete history, and the history is already on disk.
-                self.dropped += 1
+                # Uplink is slower than the pipeline. Discard the *oldest*
+                # queued row and enqueue this one: fresh state matters more
+                # than a complete stream, and the full history is on disk
+                # either way. Simply failing the put would drop the newest
+                # row instead, which is the opposite of what we want.
+                try:
+                    self._q.get_nowait()
+                    self.dropped += 1
+                    self._q.put_nowait(row)
+                except (queue.Empty, queue.Full):
+                    self.dropped += 1
 
     # ------------------------------------------------------------------ #
     def event(self, frame_id: int, kind: str, severity: str, detail: dict) -> None:
@@ -189,6 +229,12 @@ class TelemetrySink:
                     json.dumps(detail, default=str),
                 ),
             )
+            # Events are rare and are the thing an operator reviews after an
+            # incident, so they are committed immediately rather than waiting
+            # for the frame cadence.
+            self.conn.commit()
+            self._uncommitted = 0
+            self._last_commit = time.time()
 
     # ------------------------------------------------------------------ #
     def _uploader(self) -> None:
@@ -238,9 +284,13 @@ class TelemetrySink:
             self._csv_file.close()
 
     def summary(self) -> dict:
-        return {
+        d = {
             "session_id": self.session_id,
             "posted": self.posted,
             "dropped": self.dropped,
             "post_failures": self.post_failures,
         }
+        if self.dropped_columns:
+            # Never silent: a missing CSV column invalidates the record.
+            d["DROPPED_CSV_COLUMNS"] = sorted(self.dropped_columns)
+        return d

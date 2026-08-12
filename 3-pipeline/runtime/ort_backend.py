@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -95,9 +96,12 @@ class OrtSession:
         )
         self._probe_partitioning()
 
-        # Timing bookkeeping
+        # Timing bookkeeping. Bounded: a pipeline running for hours at 30 fps
+        # would otherwise accumulate millions of floats on a 14 GB board. The
+        # cap is far above any benchmark sample size, so percentiles are
+        # unaffected; a long deployment simply reports the recent window.
         self.last_infer_ms: float = 0.0
-        self._times: list[float] = []
+        self._times: deque[float] = deque(maxlen=50_000)
 
     # ------------------------------------------------------------------ #
     def _probe_partitioning(self) -> None:
@@ -122,11 +126,15 @@ class OrtSession:
             self.info.n_nodes_fallback = 0
             return
 
-        # Filled in by tools/parse_qnn_partition.py from the ORT verbose log;
-        # left at -1 here so nobody mistakes a guess for a measurement.
+        # ORT does not expose the partition map through the Python API. It is
+        # printed by the runtime at verbose log level, so the count stays -1
+        # here and the caller is told how to obtain it. -1 rather than a guess:
+        # an invented number in this column would corrupt the one measurement
+        # the benchmark exists to report.
         self.info.notes.append(
-            "n_nodes_fallback requires ORT verbose log; run with "
-            "ORT_LOG_SEVERITY=0 and parse with 4-bench/parse_partition.py"
+            "n_nodes_fallback not available from the Python API; re-run with "
+            "sess_options.log_severity_level=0 and read the "
+            "'Node placements' block the QNN EP prints at session creation"
         )
 
     # ------------------------------------------------------------------ #

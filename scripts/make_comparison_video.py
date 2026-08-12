@@ -17,6 +17,7 @@ whatever the viewer sees is attributable to the condition and nothing else.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import sys
 import time
@@ -60,6 +61,10 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--max-frames", type=int, default=0)
     ap.add_argument("--pane-width", type=int, default=960)
+    ap.add_argument("--csv", default=None,
+                    help="per-frame record; defaults to <out>.csv. This is the "
+                         "evidence behind any deployment-threshold number "
+                         "quoted from this run")
     args = ap.parse_args()
 
     if args.condition not in D.CONDITION_IDS:
@@ -165,6 +170,21 @@ def main() -> int:
     cap.release()
     if writer is not None:
         writer.release()
+
+    # Every other number in this repository ships with the CSV it came from;
+    # the deployment-threshold comparison must too.
+    csv_path = args.csv or (os.path.splitext(args.out)[0] + ".csv")
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        wcsv = csv.writer(f)
+        wcsv.writerow(["frame_id", "condition", "conf_thres", "model",
+                       "n_det_clean", "n_det_degraded",
+                       "post_ms_clean", "post_ms_degraded"])
+        for i in range(len(det_a_hist)):
+            wcsv.writerow([i, args.condition, args.conf,
+                           os.path.basename(args.model),
+                           det_a_hist[i], det_b_hist[i],
+                           round(post_a_hist[i], 4), round(post_b_hist[i], 4)])
+    print(f"[ok] {csv_path}")
 
     ma, mb = float(np.mean(det_a_hist)), float(np.mean(det_b_hist))
     print(f"[ok] {args.out}  {n} frames, {time.perf_counter() - t0:.0f}s")

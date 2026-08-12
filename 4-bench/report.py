@@ -212,6 +212,11 @@ def main() -> int:
     ap.add_argument("--quality", required=True)
     ap.add_argument("--latency", default=None)
     ap.add_argument("--out", default="results/report")
+    ap.add_argument("--img-prefix", default="",
+                    help="prefix for image links in the markdown, e.g. 'img/' "
+                         "when the report is published from docs/ while the "
+                         "figures live in docs/img/")
+    ap.add_argument("--md-name", default="report.md")
     args = ap.parse_args()
 
     if not os.path.exists(args.quality):
@@ -240,7 +245,7 @@ def main() -> int:
         "",
         robustness_table(df),
         "",
-        "![robustness](fig_robustness.png)",
+        f"![robustness]({args.img_prefix}fig_robustness.png)",
         "",
         "## 2. Latency split",
         "",
@@ -250,7 +255,7 @@ def main() -> int:
         "",
         latency_table(df),
         "",
-        "![latency](fig_latency_split.png)",
+        f"![latency]({args.img_prefix}fig_latency_split.png)",
         "",
         "## 3. Degradation cost — and why it flips with the threshold",
         "",
@@ -269,7 +274,7 @@ def main() -> int:
         "Any claim about the latency cost of degradation must therefore state",
         "the confidence threshold it was measured at.",
         "",
-        "![double penalty](fig_degradation_cost.png)",
+        f"![double penalty]({args.img_prefix}fig_degradation_cost.png)",
         "",
         "## 4. Per-class AP on clean data",
         "",
@@ -298,7 +303,7 @@ def main() -> int:
                 "",
             ]
 
-    md_path = os.path.join(args.out, "report.md")
+    md_path = os.path.join(args.out, args.md_name)
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 

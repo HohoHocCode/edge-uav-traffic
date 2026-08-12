@@ -71,8 +71,8 @@ def run_condition(
         if img is None:
             continue
         if condition != "clean":
-            # Seeded per image index: the degraded set is byte-identical
-            # across runs and machines.
+            # Seeded per image index: the degraded set is reproducible run to
+            # run, and bit-exact for a given OpenCV build.
             img = D.apply_condition(img, condition, seed=i)
 
         d = det(img)

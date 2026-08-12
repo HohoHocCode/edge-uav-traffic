@@ -14,9 +14,16 @@ Counting rules, stated once so the report can cite them:
 
 - Only *confirmed* tracks are counted. A detection that has been seen fewer
   than ``min_hits`` times is not an object yet.
-- A line crossing is attributed to a track exactly once per direction change,
-  keyed on track id, so re-crossing the same line back and forth counts twice
-  (once each way) and jitter on the line counts zero.
+- A line crossing requires the track's motion segment to intersect the drawn
+  *segment*, not merely to change sides of the infinite line it lies on.
+  Traffic passing beyond either end of the painted line is not counted.
+- A crossing is attributed to a track once per direction change, keyed on
+  track id, so re-crossing back and forth counts twice (once each way) and
+  jitter on the line counts zero.
+- A track whose centroid jumps more than ``max_step_norm`` of the frame in one
+  frame is an association error rather than a vehicle; its implied motion
+  segment would sweep every line in its path, so no crossing is counted for
+  that step.
 - ROI membership uses the box centroid, not overlap. Overlap makes a vehicle
   straddling the ROI edge belong to two regions at once, and then the regional
   counts no longer sum to the frame count.
@@ -31,9 +38,40 @@ import numpy as np
 
 # --------------------------------------------------------------------------- #
 def _side_of_line(px: float, py: float, seg: tuple[float, float, float, float]) -> float:
-    """Signed side of point (px, py) relative to the directed segment."""
+    """Signed side of point (px, py) relative to the directed segment's line."""
     x1, y1, x2, y2 = seg
     return (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+
+
+def _segments_cross(
+    p1: tuple[float, float], p2: tuple[float, float],
+    seg: tuple[float, float, float, float],
+) -> bool:
+    """True if the motion segment p1->p2 properly crosses the counting segment.
+
+    A sign change of :func:`_side_of_line` alone is **not** a crossing: it only
+    says the track moved from one side of the *infinite line* to the other. A
+    vehicle passing far beyond either end of the painted line produces exactly
+    that sign change, and counting it inflates the tally with traffic that
+    never went through the counted gate.
+
+    Solving for both parameters and requiring each to lie in [0, 1] restricts
+    the test to the drawn segment.
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3, x4, y4 = seg
+
+    rx, ry = x2 - x1, y2 - y1
+    sx, sy = x4 - x3, y4 - y3
+    denom = rx * sy - ry * sx
+    if abs(denom) < 1e-12:
+        return False                      # parallel or degenerate
+
+    qpx, qpy = x3 - x1, y3 - y1
+    t = (qpx * sy - qpy * sx) / denom     # along the motion segment
+    u = (qpx * ry - qpy * rx) / denom     # along the counting segment
+    return 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0
 
 
 @dataclass
@@ -93,6 +131,7 @@ class TrafficAnalytics:
         warn_count: int = 25,
         alert_count: int = 45,
         hysteresis: int = 5,
+        max_step_norm: float = 0.25,
     ) -> None:
         self.class_names = dict(class_names)
         self.groups = groups or {}
@@ -105,15 +144,19 @@ class TrafficAnalytics:
         self.warn_count = warn_count
         self.alert_count = alert_count
         self.hysteresis = hysteresis
+        self.max_step_norm = max_step_norm
 
         # track_id -> {line_name: last signed side}
         self._last_side: dict[int, dict[str, float]] = {}
+        # track_id -> last normalised centroid, for the segment-crossing test
+        self._last_pos: dict[int, tuple[float, float]] = {}
         # cumulative crossings
         self._crossings: dict[str, dict[str, int]] = {
             ln.name: {"forward": 0, "backward": 0} for ln in self.lines
         }
         self._level = "normal"
         self._level_streak = 0
+        self._pending_level: str | None = None
 
     # ------------------------------------------------------------------ #
     def _class_name(self, cls_id: int) -> str:
@@ -126,7 +169,11 @@ class TrafficAnalytics:
         rep = FrameReport(frame_id=frame_id, timestamp_ms=timestamp_ms,
                           n_tracks=len(tracks))
 
-        counts_cls: dict[str, int] = {}
+        # Seed every known class at zero. Without this the key set of
+        # counts_by_class varies frame to frame, and any consumer that locks
+        # its schema on the first frame -- the telemetry CSV writer does --
+        # permanently loses the columns for classes absent from frame 0.
+        counts_cls: dict[str, int] = {n: 0 for n in self.class_names.values()}
         counts_roi: dict[str, int] = {r.name: 0 for r in self.rois}
         live_ids = set()
 
@@ -143,24 +190,47 @@ class TrafficAnalytics:
                 if x1 <= nx <= x2 and y1 <= ny <= y2:
                     counts_roi[r.name] += 1
 
-            # Line crossing uses the previous *recorded* side for this track,
-            # so a track that appears already past the line never fires.
+            # Line crossing needs a persistent identity. A negative track_id
+            # marks a detection wrapped as a track (tracker disabled): those
+            # ids are per-frame positions in the detection list, so id -1 in
+            # consecutive frames is two unrelated objects, and treating them
+            # as one manufactures a crossing on almost every frame.
+            if t.track_id < 0:
+                continue
+
+            # Line crossing uses the track's previous *recorded* position, so a
+            # track that appears already past the line never fires.
+            prev_pos = self._last_pos.get(t.track_id)
             sides = self._last_side.setdefault(t.track_id, {})
+
+            # Guard against detector flicker. An identity that jumps most of
+            # the way across the frame in one frame is an association error,
+            # not a vehicle, and the segment it implies would sweep across
+            # every counting line in its path.
+            step_ok = prev_pos is not None and (
+                (nx - prev_pos[0]) ** 2 + (ny - prev_pos[1]) ** 2
+            ) <= self.max_step_norm ** 2
+
             for ln in self.lines:
                 s = _side_of_line(nx, ny, ln.seg)
                 prev = sides.get(ln.name)
-                if prev is not None and prev != 0.0 and s != 0.0:
+                if (prev_pos is not None and step_ok and prev is not None
+                        and prev != 0.0 and s != 0.0
+                        and _segments_cross(prev_pos, (nx, ny), ln.seg)):
                     if prev < 0 < s:
                         self._crossings[ln.name]["forward"] += 1
                     elif s < 0 < prev:
                         self._crossings[ln.name]["backward"] += 1
                 sides[ln.name] = s
 
+            self._last_pos[t.track_id] = (nx, ny)
+
         # Forget tracks that are gone, so the dict cannot grow without bound
         # over a long deployment.
         for tid in list(self._last_side):
             if tid not in live_ids:
                 self._last_side.pop(tid, None)
+                self._last_pos.pop(tid, None)
 
         rep.counts_by_class = counts_cls
         rep.counts_by_roi = counts_roi
@@ -185,7 +255,14 @@ class TrafficAnalytics:
         A raw threshold on a per-frame count flickers between states whenever
         the detector drops one vehicle, which produces an alert stream nobody
         will trust. The level only moves after ``hysteresis`` consecutive
-        frames agree on the new level.
+        frames agree on *the same* new level.
+
+        That last word is the whole point. Counting any frame that merely
+        disagrees with the current level lets an alternating warn/alert/warn
+        sequence accumulate a streak and flip the state, which is precisely
+        the flapping the hysteresis exists to prevent. The candidate level is
+        therefore tracked explicitly and the streak restarts whenever it
+        changes.
         """
         if vehicle_count >= self.alert_count:
             target = "alert"
@@ -195,12 +272,19 @@ class TrafficAnalytics:
             target = "normal"
 
         if target == self._level:
+            self._pending_level = None
             self._level_streak = 0
             return self._level
 
-        self._level_streak += 1
+        if target != self._pending_level:
+            self._pending_level = target
+            self._level_streak = 1
+        else:
+            self._level_streak += 1
+
         if self._level_streak >= self.hysteresis:
             self._level = target
+            self._pending_level = None
             self._level_streak = 0
         return self._level
 
@@ -211,10 +295,12 @@ class TrafficAnalytics:
 
     def reset(self) -> None:
         self._last_side.clear()
+        self._last_pos.clear()
         for d in self._crossings.values():
             d["forward"] = d["backward"] = 0
         self._level = "normal"
         self._level_streak = 0
+        self._pending_level = None
 
 
 # --------------------------------------------------------------------------- #
@@ -232,4 +318,6 @@ def build_from_config(cfg: dict, class_names: dict[int, str],
         vehicle_classes=cong.get("vehicle_classes"),
         warn_count=cong.get("warn_count", 25),
         alert_count=cong.get("alert_count", 45),
+        hysteresis=cong.get("hysteresis", 5),
+        max_step_norm=cfg.get("max_step_norm", 0.25),
     )

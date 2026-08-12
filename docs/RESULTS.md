@@ -21,7 +21,7 @@
 | `blur_medium` | 0.1254 | 0.2230 | 0.0450 | 73% | 60% | 254 | 17.4 | -13% |
 | `fog_medium` | 0.1618 | 0.2853 | 0.0719 | 94% | 95% | 261 | 23.8 | +19% |
 
-![robustness](fig_robustness.png)
+![robustness](img/fig_robustness.png)
 
 ## 2. Latency split
 
@@ -42,7 +42,7 @@ with resolution, `post` with scene density.
 | `blur_medium` | 5.3 | 45.4 | 17.4 | 68.1 | 14.7 |
 | `fog_medium` | 5.4 | 54.5 | 23.8 | 83.8 | 11.9 |
 
-![latency](fig_latency_split.png)
+![latency](img/fig_latency_split.png)
 
 ## 3. Degradation cost — and why it flips with the threshold
 
@@ -61,7 +61,7 @@ when the truth is 'cannot see'.
 Any claim about the latency cost of degradation must therefore state
 the confidence threshold it was measured at.
 
-![double penalty](fig_degradation_cost.png)
+![double penalty](img/fig_degradation_cost.png)
 
 ## 4. Per-class AP on clean data
 

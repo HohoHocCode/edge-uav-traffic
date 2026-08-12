@@ -44,8 +44,9 @@ claim believable.
   are reported separately. A detector with a 3 ms forward pass and a 15 ms NMS
   tail is not a 3 ms detector.
 - **Robustness under degraded capture.** Ten conditions — rain (light/medium/
-  heavy), brightness up/down, motion blur, fog — applied deterministically so
-  the degraded set is byte-identical across machines. See `2-augment/`.
+  heavy), brightness up/down, motion blur, fog — seeded per image index, so
+  the degraded set is reproducible run to run (bit-exact on a given OpenCV
+  build; deterministic but not bit-exact across builds). See `2-augment/`.
 - **Resource cost.** Thermal, CPU/GPU frequency and any power rail the board
   actually exposes. If the board has no energy counter, the tool says so
   instead of reporting a zero. See `4-bench/probe_power.py`.
@@ -78,13 +79,14 @@ If you can only augment one thing, augment rain.
 **The latency penalty flips sign with the confidence threshold.** At the AP
 protocol (`conf 0.001`) rain raises CPU postprocessing 85 %, because streaks
 manufacture candidates that clear the threshold. At the deployment threshold
-(`conf 0.25`) the same rain *lowers* NMS cost 37 % — the pipeline gets faster
-because it sees less. Operationally that is the worse of the two: latency
-telemetry looks healthy exactly when the detector is going blind. See
-[`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+(`conf 0.25`) the same rain *lowers* NMS cost 44 % and drops detections to
+46.6 % — the pipeline gets faster because it sees less. Operationally that is
+the worse of the two: latency telemetry looks healthy exactly when the
+detector is going blind. See [`docs/BENCHMARK.md`](docs/BENCHMARK.md) and the
+per-frame record in [`docs/results/compare_rain_heavy.csv`](docs/results/compare_rain_heavy.csv).
 
 <p align="center">
-  <img src="docs/img/robustness.png" alt="AP and APs across ten degradation conditions" width="860">
+  <img src="docs/img/fig_robustness.png" alt="AP and APs across ten degradation conditions" width="860">
 </p>
 
 ---
