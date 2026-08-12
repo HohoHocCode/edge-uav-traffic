@@ -186,13 +186,25 @@ uses as a training-time callback, so the training and evaluation distributions
 come from identical code and an improvement cannot be an artefact of two
 different rain models.
 
+**Colab, end to end** — [`notebooks/finetune_weather_colab.ipynb`](notebooks/finetune_weather_colab.ipynb)
+([open in Colab](https://colab.research.google.com/github/HohoHocCode/edge-uav-traffic/blob/main/notebooks/finetune_weather_colab.ipynb)):
+fetches VisDrone, builds the augmented set, fine-tunes, exports ONNX and
+re-measures on the identical protocol.
+
+**Or build the dataset offline for any trainer:**
+
 ```bash
-python 1-model/finetune_weather.py --weights models/yolov8n_visdrone.pt \
-    --data VisDrone.yaml --epochs 60 --degrade-prob 0.35
+python 2-augment/build_dataset.py --train data/VisDrone2019-DET-train \
+    --val data/VisDrone2019-DET-val --out /path/to/out \
+    --mode pair --max-side 1024 \
+    --conditions rain_light:0.34 rain_medium:0.34 bright_down:0.16 blur_light:0.16
 ```
 
-Re-running `bench_quality.py` on the result gives a before/after pair on an
-identical protocol.
+`rain_heavy`, `bright_down_heavy`, `blur_medium` and `fog_medium` are held out
+of training on purpose. Training on the condition you then report turns the
+improvement into recall of the test; holding them out makes four of the ten
+benchmark columns a generalisation result instead. The headline number comes
+out lower and means considerably more.
 
 Every benchmark row carries the model hash, the backend, the resolution, the
 condition id and the ignore-region policy. A number without those cannot be
