@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkySentry — Trung tâm giám sát</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --fg:#e8eaed; --muted:#9aa3b2;
+    --ok:#4ade80; --warn:#fbbf24; --alert:#f87171; --accent:#60a5fa;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:baseline;gap:16px;padding:16px 22px;
+         border-bottom:1px solid var(--line);flex-wrap:wrap}
+  h1{font-size:17px;margin:0;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+  main{padding:18px 22px;display:grid;gap:16px;
+       grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;
+            color:var(--muted);margin:0 0 12px}
+  .wide{grid-column:1/-1}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;
+     letter-spacing:.06em}
+  td.num{font-family:var(--mono);text-align:right}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;
+         font-weight:600;letter-spacing:.04em}
+  .b-normal{background:rgba(74,222,128,.15);color:var(--ok)}
+  .b-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+  .b-alert{background:rgba(248,113,113,.16);color:var(--alert)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+  .kpi{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:11px 13px}
+  .kpi .v{font-family:var(--mono);font-size:23px;line-height:1.15}
+  .kpi .l{color:var(--muted);font-size:11px;margin-top:3px}
+  canvas{width:100%;height:190px;display:block}
+  .feed{max-height:260px;overflow:auto;font-size:13px}
+  .feed div{padding:6px 8px;border-bottom:1px solid var(--line);display:flex;gap:10px}
+  .feed time{color:var(--muted);font-family:var(--mono);font-size:12px}
+  .empty{color:var(--muted);padding:14px 8px;font-style:italic}
+  footer{padding:12px 22px;color:var(--muted);font-size:12px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>SkySentry — Trung tâm giám sát trật tự giao thông</h1>
+  <span class="sub"><span id="live-dot" class="dot" style="background:var(--muted)"></span>
+    <span id="live-text">đang kết nối…</span></span>
+  <span class="sub" style="margin-left:auto" id="clock"></span>
+</header>
+
+<main>
+  <section class="panel wide">
+    <h2>Tổng quan</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="k-nodes">0</div><div class="l">node hoạt động</div></div>
+      <div class="kpi"><div class="v" id="k-veh">0</div><div class="l">phương tiện</div></div>
+      <div class="kpi"><div class="v" id="k-ppl">0</div><div class="l">người</div></div>
+      <div class="kpi"><div class="v" id="k-trk">0</div><div class="l">track đang bám</div></div>
+      <div class="kpi"><div class="v" id="k-fps">–</div><div class="l">FPS trên thiết bị</div></div>
+      <div class="kpi"><div class="v" id="k-lat">–</div><div class="l">độ trễ (ms/frame)</div></div>
+    </div>
+  </section>
+
+  <section class="panel wide">
+    <h2>Mật độ theo thời gian</h2>
+    <canvas id="chart" height="190"></canvas>
+  </section>
+
+  <section class="panel">
+    <h2>Các node biên</h2>
+    <table>
+      <thead><tr><th>Node</th><th>Phiên</th><th class="num">Frame</th>
+        <th class="num">PT</th><th class="num">Người</th><th>Trạng thái</th></tr></thead>
+      <tbody id="tbl"><tr><td colspan="6" class="empty">Chưa có node nào gửi dữ liệu.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Nhật ký cảnh báo</h2>
+    <div class="feed" id="feed"><div class="empty">Chưa có sự kiện.</div></div>
+  </section>
+</main>
+
+<footer>Dữ liệu do node biên Qualcomm QCS8550 gửi về · làm mới mỗi 1 giây</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+let failures = 0;
+
+function badge(level){
+  const cls = level === 'alert' ? 'b-alert' : level === 'warn' ? 'b-warn' : 'b-normal';
+  const txt = level === 'alert' ? 'ÙN TẮC' : level === 'warn' ? 'ĐÔNG' : 'BÌNH THƯỜNG';
+  return `<span class="badge ${cls}">${txt}</span>`;
+}
+
+function setLive(ok, msg){
+  $('live-dot').style.background = ok ? 'var(--ok)' : 'var(--alert)';
+  $('live-text').textContent = msg;
+}
+
+async function getJSON(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function drawChart(series){
+  const cv = $('chart');
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = 190;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const g = cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H);
+
+  if(!series.length){
+    g.fillStyle = '#9aa3b2'; g.font = '13px system-ui';
+    g.fillText('Chưa có dữ liệu', 12, H/2);
+    return;
+  }
+  const pad = {l:36, r:10, t:12, b:20};
+  const veh = series.map(d => d.vehicle_count ?? 0);
+  const ppl = series.map(d => d.person_count ?? 0);
+  const maxY = Math.max(5, ...veh, ...ppl);
+  const x = i => pad.l + i*(W-pad.l-pad.r)/Math.max(series.length-1,1);
+  const y = v => H-pad.b - (v/maxY)*(H-pad.t-pad.b);
+
+  // grid
+  g.strokeStyle = '#252a34'; g.lineWidth = 1; g.font = '10px ui-monospace';
+  g.fillStyle = '#9aa3b2';
+  for(let k=0;k<=4;k++){
+    const v = Math.round(maxY*k/4), yy = y(v);
+    g.beginPath(); g.moveTo(pad.l,yy); g.lineTo(W-pad.r,yy); g.stroke();
+    g.fillText(String(v), 6, yy+3);
+  }
+  const line = (arr, colour) => {
+    g.strokeStyle = colour; g.lineWidth = 2; g.beginPath();
+    arr.forEach((v,i)=> i ? g.lineTo(x(i),y(v)) : g.moveTo(x(i),y(v)));
+    g.stroke();
+  };
+  line(veh, '#60a5fa');
+  line(ppl, '#4ade80');
+
+  g.fillStyle='#60a5fa'; g.fillRect(pad.l, 4, 10, 3);
+  g.fillStyle='#9aa3b2'; g.font='11px system-ui'; g.fillText('phương tiện', pad.l+15, 8);
+  g.fillStyle='#4ade80'; g.fillRect(pad.l+95, 4, 10, 3);
+  g.fillStyle='#9aa3b2'; g.fillText('người', pad.l+110, 8);
+}
+
+async function tick(){
+  $('clock').textContent = new Date().toLocaleTimeString('vi-VN');
+  try{
+    const [state, ts, events] = await Promise.all([
+      getJSON('/api/state'), getJSON('/api/timeseries?limit=240'), getJSON('/api/events?limit=30')
+    ]);
+    failures = 0;
+
+    // A node that has not reported for 15 s is stale, not live. Counting it
+    // would make the overview lie during an uplink drop.
+    const live = state.filter(s => s.age_s < 15);
+    $('k-nodes').textContent = live.length;
+    $('k-veh').textContent = live.reduce((a,s)=>a+(s.vehicle_count||0),0);
+    $('k-ppl').textContent = live.reduce((a,s)=>a+(s.person_count||0),0);
+    $('k-trk').textContent = live.reduce((a,s)=>a+(s.n_tracks||0),0);
+    const lat = live.length ? live.reduce((a,s)=>a+(s.total_ms||0),0)/live.length : 0;
+    $('k-lat').textContent = lat ? lat.toFixed(1) : '–';
+    $('k-fps').textContent = lat ? (1000/lat).toFixed(1) : '–';
+
+    $('tbl').innerHTML = state.length ? state.map(s=>`<tr>
+        <td>${s.node||'-'}</td><td class="sub">${s.session_id}</td>
+        <td class="num">${s.frame_id??'-'}</td>
+        <td class="num">${s.vehicle_count??0}</td>
+        <td class="num">${s.person_count??0}</td>
+        <td>${badge(s.congestion_level||'normal')}${
+          s.age_s>=15 ? ' <span class="sub">mất kết nối</span>' : ''}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="6" class="empty">Chưa có node nào gửi dữ liệu.</td></tr>';
+
+    $('feed').innerHTML = events.length ? events.map(e=>`<div>
+        <time>${e.at}</time><span>${badge(e.level)}</span>
+        <span class="sub">${e.node||''} · ${e.detail.vehicles??'?'} phương tiện</span>
+      </div>`).join('')
+      : '<div class="empty">Chưa có sự kiện.</div>';
+
+    drawChart(ts);
+    setLive(true, `trực tuyến · ${live.length} node`);
+  }catch(err){
+    failures++;
+    setLive(false, `mất kết nối tới máy chủ (${failures})`);
+  }
+}
+tick();
+setInterval(tick, 1000);
+window.addEventListener('resize', ()=>getJSON('/api/timeseries?limit=240').then(drawChart).catch(()=>{}));
+</script>
+</body>
+</html>

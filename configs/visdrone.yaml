@@ -1,0 +1,26 @@
+# VisDrone taxonomy — frozen. Do not reorder; index == model output channel.
+names:
+  0: pedestrian
+  1: people
+  2: bicycle
+  3: car
+  4: van
+  5: truck
+  6: tricycle
+  7: awning-tricycle
+  8: bus
+  9: motor
+
+nc: 10
+
+# Grouping used by the analytics layer (Task 5 / traffic-order reporting).
+groups:
+  person: [pedestrian, people]
+  two_wheeler: [bicycle, motor]
+  three_wheeler: [tricycle, awning-tricycle]
+  light_vehicle: [car, van]
+  heavy_vehicle: [truck, bus]
+
+# COCO "small object" convention, in pixels^2 on the evaluated image.
+area_small_max: 1024      # 32 x 32
+area_medium_max: 9216     # 96 x 96

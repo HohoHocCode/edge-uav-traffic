@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Datasets — 78 MB, fetched by scripts/fetch_data.ps1
+data/
+
+# Run outputs. Must be `results/*` not `results/`: git cannot re-include a file
+# inside an excluded directory, so the .gitkeep would never be tracked.
+results/*
+!results/.gitkeep
+
+# Generated media (regenerate with scripts/make_clip.py)
+assets/*.mp4
+assets/*.avi
+*.png
+!docs/img/*.png
+
+# Ultralytics side effects
+runs/
+*.onnx.meta.json.bak
+yolo*.pt
+!models/yolov8n_visdrone.pt
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

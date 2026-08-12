@@ -1,0 +1,13 @@
+# On-device (aarch64 Qualcomm Linux / Ubuntu).
+# Deliberately small: no torch, no ultralytics, nothing that needs a compiler.
+numpy>=1.24
+opencv-python-headless>=4.9
+pyyaml>=6.0
+
+# CPU baseline. Install this first and confirm the pipeline runs at all.
+onnxruntime>=1.17
+
+# NPU path. Provides QNNExecutionProvider; needs the QAIRT libraries present
+# on the device (libQnnHtp.so and friends) and reachable via LD_LIBRARY_PATH.
+# Installing this REPLACES plain onnxruntime -- do not install both.
+#   pip3 install onnxruntime-qnn

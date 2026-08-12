@@ -1,0 +1,72 @@
+# SkySentry pipeline configuration — frozen for the reported run.
+# Every value that changes a reported number lives here, not in code.
+
+model:
+  # Host/dev path. On device this is overridden by --model.
+  weights: models/yolov8n_visdrone.onnx
+  imgsz: 640
+  # Backend is resolved at runtime; see 3-pipeline/runtime/__init__.py
+  # one of: onnxruntime-cpu | onnxruntime-qnn | qnn | tflite
+  backend: auto
+  precision: w8a8          # float | w8a8 | w8a16  (metadata only; the artefact decides)
+  conf_thres: 0.25
+  iou_thres: 0.45
+  max_det: 300
+  # Letterbox pad colour must match what the model was calibrated with.
+  pad_value: 114
+
+tracker:
+  enabled: true
+  type: bytetrack          # bytetrack | none
+  track_high_thresh: 0.50
+  track_low_thresh: 0.10
+  new_track_thresh: 0.60
+  # IoU thresholds (higher = stricter). Upstream ByteTrack writes these as a
+  # cost bar of 0.8 / 0.5 on (1 - IoU); stated as IoU that is 0.20 / 0.50.
+  match_iou: 0.20          # stage 1: high-confidence dets vs all tracks
+  match_iou_low: 0.50      # stage 2: low-confidence dets vs leftover tracks
+  track_buffer: 30         # frames to keep a lost track alive
+  min_box_area: 4.0
+  # A track is "mature" (counted, reported) only after this many hits.
+  min_hits: 3
+
+analytics:
+  enabled: true
+  # Task 5 — crowd/vehicle counting. Counts are reported per frame and per ROI.
+  count_interval_s: 1.0
+  # Regions of interest, normalised [x1, y1, x2, y2] in 0..1 of the frame.
+  rois:
+    - name: intersection
+      box: [0.25, 0.25, 0.75, 0.75]
+    - name: full_frame
+      box: [0.0, 0.0, 1.0, 1.0]
+  # Line crossing: normalised [x1, y1, x2, y2]. Direction sign is (a->b).
+  lines:
+    - name: main_road
+      seg: [0.0, 0.55, 1.0, 0.55]
+  # Congestion heuristic reported to the command post.
+  congestion:
+    vehicle_classes: [car, van, truck, bus, motor, tricycle, awning-tricycle]
+    warn_count: 25
+    alert_count: 45
+
+telemetry:
+  enabled: true
+  local_db: results/telemetry.sqlite
+  # Command-post endpoint. Empty string = local-only (offline mode).
+  post_url: ""
+  post_interval_s: 2.0
+  # Frame-level CSV always written; this is the benchmark's raw record.
+  csv_path: results/runtime_telemetry.csv
+
+capture:
+  source: 0                # int (camera index) | path to video | rtsp url
+  target_fps: 0            # 0 = as fast as possible
+  resize_input: null       # null = native
+
+overlay:
+  enabled: true
+  show_track_id: true
+  show_latency: true
+  show_counts: true
+  save_video: null         # path or null

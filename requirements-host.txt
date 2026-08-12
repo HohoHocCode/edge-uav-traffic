@@ -1,0 +1,16 @@
+# Host / development machine (x86 laptop).
+# Needed for exporting the model and running the benchmarks off-device.
+numpy>=1.26
+opencv-python>=4.9          # use opencv-python-headless on a server
+pyyaml>=6.0
+onnxruntime>=1.17
+pandas>=2.0                 # report tables only
+tqdm>=4.66
+
+# Export only — not needed to run the pipeline.
+ultralytics>=8.3
+onnx>=1.15
+onnxslim>=0.1
+
+# Optional: submitting compile/profile jobs to Qualcomm AI Hub Workbench
+# qai-hub>=0.9
