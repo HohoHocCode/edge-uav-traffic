@@ -139,6 +139,7 @@ def process_split(
     src_root: str, out_root: str, split: str, mode: str,
     degrade_frac: float, conds, seed: int, jpeg_quality: int,
     augment: bool, limit: int | None, writer_rows: list,
+    max_side: int = 0,
 ) -> dict:
     img_dir = os.path.join(src_root, "images")
     ann_dir = os.path.join(src_root, "annotations")
@@ -155,7 +156,7 @@ def process_split(
         names = names[:limit]
 
     rng = random.Random(seed)
-    stats = {"src": len(names), "written": 0, "degraded": 0,
+    stats = {"src": len(names), "written": 0, "degraded": 0, "resized": 0,
              "objects": 0, "ignored": 0, "others": 0, "skipped": 0}
     t0 = time.perf_counter()
 
@@ -166,10 +167,29 @@ def process_split(
         if img is None:
             stats["skipped"] += 1
             continue
-        h, w = img.shape[:2]
+
+        # Annotation boxes are in ORIGINAL pixel coordinates, so the
+        # normalisation below must use the original dimensions. Capturing
+        # them before any resize is what keeps the labels correct; using the
+        # post-resize size would silently rescale every box.
+        orig_h, orig_w = img.shape[:2]
+
+        # Optional downscale of the *stored* image. Training letterboxes to
+        # imgsz anyway, so the total scale factor an object experiences is
+        # unchanged -- a 20 px object in a 1920 px frame lands at 6.7 px in a
+        # 640 px input whether or not it passes through 1024 on the way. Only
+        # the intermediate resampling differs. What it buys is decode cost:
+        # mosaic pulls four images per sample, so on a 2-vCPU Colab box JPEG
+        # decode, not the GPU, sets the epoch time.
+        if max_side and max(img.shape[:2]) > max_side:
+            s = max_side / max(img.shape[:2])
+            img = cv2.resize(img, (int(round(img.shape[1] * s)),
+                                   int(round(img.shape[0] * s))),
+                             interpolation=cv2.INTER_AREA)
+            stats["resized"] += 1
 
         objs, n_ign, n_oth = parse_visdrone_ann(os.path.join(ann_dir, stem + ".txt"))
-        lines = to_yolo_lines(objs, w, h)
+        lines = to_yolo_lines(objs, orig_w, orig_h)
         stats["objects"] += len(lines)
         stats["ignored"] += n_ign
         stats["others"] += n_oth
@@ -239,6 +259,19 @@ def main() -> int:
     ap.add_argument("--jpeg-quality", type=int, default=92)
     ap.add_argument("--limit", type=int, default=0, help="debug: cap images/split")
     ap.add_argument("--clean", action="store_true", help="wipe the output dir first")
+    ap.add_argument("--max-side", type=int, default=0,
+                    help="downscale stored images so the long side is at most "
+                         "this many pixels (0 = keep native). Labels are "
+                         "unaffected: they are normalised against the original "
+                         "dimensions. 1024 cuts JPEG decode cost ~3.5x, which "
+                         "is what sets epoch time on a 2-vCPU Colab box")
+    ap.add_argument("--conditions", nargs="*", default=None,
+                    help="override the training conditions, as name:weight "
+                         "pairs, e.g. rain_light:0.3 rain_medium:0.3 "
+                         "bright_down:0.2 blur_light:0.2. Holding a condition "
+                         "OUT of training is what turns its benchmark column "
+                         "into a generalisation test rather than a recall of "
+                         "something already seen")
     args = ap.parse_args()
 
     out = os.path.abspath(args.out)
@@ -248,8 +281,23 @@ def main() -> int:
     os.makedirs(out, exist_ok=True)
 
     conds = DEFAULT_CONDITIONS
-    print(f"[info] mode={args.mode}  seed={args.seed}  jpeg_q={args.jpeg_quality}")
-    print(f"[info] conditions: {[c for c, _ in conds]}")
+    if args.conditions:
+        conds = []
+        for spec in args.conditions:
+            name, _, w = spec.partition(":")
+            if name not in D.CONDITION_IDS:
+                print(f"[fatal] unknown condition {name!r}; "
+                      f"known: {D.CONDITION_IDS}", file=sys.stderr)
+                return 2
+            conds.append((name, float(w) if w else 1.0))
+
+    held_out = [c for c in D.CONDITION_IDS
+                if c != "clean" and c not in {n for n, _ in conds}]
+
+    print(f"[info] mode={args.mode}  seed={args.seed}  jpeg_q={args.jpeg_quality}"
+          f"  max_side={args.max_side or 'native'}")
+    print(f"[info] train conditions: {[c for c, _ in conds]}")
+    print(f"[info] held out (generalisation columns in the benchmark): {held_out}")
     print(f"[info] out: {out}")
 
     rows: list[list] = []
@@ -258,14 +306,16 @@ def main() -> int:
     print("[run] train split")
     st_train = process_split(args.train, out, "train", args.mode,
                              args.degrade_frac, conds, args.seed,
-                             args.jpeg_quality, True, limit, rows)
+                             args.jpeg_quality, True, limit, rows,
+                             max_side=args.max_side)
 
     st_val = None
     if args.val:
         print("[run] val split")
         st_val = process_split(args.val, out, "val", args.mode,
                                args.degrade_frac, conds, args.seed + 1,
-                               args.jpeg_quality, args.augment_val, limit, rows)
+                               args.jpeg_quality, args.augment_val, limit, rows,
+                               max_side=args.max_side)
 
     # -- manifest ------------------------------------------------------
     with open(os.path.join(out, "manifest.csv"), "w", newline="",
@@ -297,7 +347,7 @@ def main() -> int:
         print(f"  {nm}: {st['src']} source -> {st['written']} images "
               f"({st['degraded']} degraded), {st['objects']} boxes, "
               f"{st['ignored']} ignored + {st['others']} others dropped, "
-              f"{st['seconds'] / 60:.1f} min")
+              f"{st['resized']} resized, {st['seconds'] / 60:.1f} min")
     size = dir_size_gb(out)
     print(f"  total on disk: {size:.2f} GB")
     print(f"  data.yaml: {yaml_path}")
