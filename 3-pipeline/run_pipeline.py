@@ -247,8 +247,10 @@ def main(argv=None) -> int:
         if show_window:
             cv2.destroyAllWindows()
         if sink is not None:
-            print(f"[info] telemetry: {sink.summary()}")
+            # close() drains the uploader queue, so the summary is only
+            # accurate afterwards; printing it first under-reports `posted`.
             sink.close()
+            print(f"[info] telemetry: {sink.summary()}")
 
     if totals:
         a = np.asarray(totals)
