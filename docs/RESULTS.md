@@ -46,20 +46,31 @@ with resolution, `post` with scene density.
 
 ## 3. Degradation cost — and why it flips with the threshold
 
-At the AP-measurement threshold (conf 0.001) rain creates
-spurious candidates that survive scoring, so NMS on the CPU has more
-boxes to process and postprocessing gets *slower*.
+At the AP-measurement threshold (conf 0.001) degradation
+can create spurious candidates that survive scoring, so NMS on the CPU
+has more boxes to process and postprocessing gets *slower*. At a
+deployment threshold the effect can reverse: degradation pushes
+confidences below the bar, fewer boxes reach NMS, and the pipeline gets
+**faster because it sees less**.
 
-**This reverses at the deployment threshold.** Measured at conf 0.25 on
-the demo clip, heavy rain drops detections 64.7 -> 30.1 per frame and
-NMS cost 3.1 -> 1.8 ms: the pipeline gets **faster because it sees
-less**. Operationally that is the worse failure of the two — latency
-telemetry looks healthy at exactly the moment the system goes blind,
-and the vehicle count falls, so a congestion monitor reads 'normal'
-when the truth is 'cannot see'.
+That second case is the more dangerous one operationally — latency
+telemetry looks healthy at exactly the moment the detector is going
+blind, and since the vehicle count falls too, a congestion monitor
+reads 'normal' when the truth is 'cannot see'.
 
-Any claim about the latency cost of degradation must therefore state
-the confidence threshold it was measured at.
+Any claim about the latency cost of degradation must state the
+confidence threshold it was measured at **and the model it was measured
+on** — this report covers `yolov8n_visdrone_640.onnx` only. Deployment-threshold
+figures come from a separate run of
+`scripts/make_comparison_video.py`, which writes its own CSV.
+
+> **Latency columns in this run are not reliable.** `infer_ms` is a
+> fixed-shape forward pass — identical work on every frame — yet it
+> varies **20%** across conditions here (worst: `fog_medium`).
+> That is host load or thermal state, not the data, and the same
+> noise contaminates the `post_ms` deltas beside it. Quote the AP
+> columns, which are deterministic; re-measure latency on an idle
+> machine, or better, on the target device.
 
 ![double penalty](img/fig_degradation_cost.png)
 

@@ -110,6 +110,36 @@ def latency_table(df: pd.DataFrame) -> str:
     )
 
 
+def _latency_caveat(df: pd.DataFrame) -> str:
+    """Warn when the host was too noisy for the latency columns to mean anything.
+
+    ``infer_ms`` is a fixed-shape forward pass: identical work on every frame
+    regardless of what the frame contains. If it varies across conditions, the
+    variation is host load or thermal state, not the data — and the ``post_ms``
+    deltas measured alongside it are contaminated by the same noise. Better to
+    say so in the report than to let a reader infer a content effect from a
+    scheduling artefact.
+    """
+    inf = df["infer_ms_avg"]
+    spread = float(inf.max() / max(inf.min(), 1e-9) - 1.0) * 100.0
+    if spread < 5.0:
+        return (f"_Host was stable during this run: `infer_ms` varies only "
+                f"{spread:.1f}% across conditions, so the `post_ms` deltas "
+                f"reflect the data rather than the machine._")
+
+    worst = df.loc[inf.idxmax(), "condition"]
+    return (
+        f"> **Latency columns in this run are not reliable.** `infer_ms` is a\n"
+        f"> fixed-shape forward pass — identical work on every frame — yet it\n"
+        f"> varies **{spread:.0f}%** across conditions here (worst: "
+        f"`{worst}`).\n"
+        f"> That is host load or thermal state, not the data, and the same\n"
+        f"> noise contaminates the `post_ms` deltas beside it. Quote the AP\n"
+        f"> columns, which are deterministic; re-measure latency on an idle\n"
+        f"> machine, or better, on the target device."
+    )
+
+
 def per_class_table(df: pd.DataFrame) -> str:
     cols = [c for c in df.columns if c.startswith("AP_") and c not in
             ("AP_retention",)]
@@ -259,20 +289,25 @@ def main() -> int:
         "",
         "## 3. Degradation cost — and why it flips with the threshold",
         "",
-        f"At the AP-measurement threshold (conf {meta['conf_thres']}) rain creates",
-        "spurious candidates that survive scoring, so NMS on the CPU has more",
-        "boxes to process and postprocessing gets *slower*.",
+        f"At the AP-measurement threshold (conf {meta['conf_thres']}) degradation",
+        "can create spurious candidates that survive scoring, so NMS on the CPU",
+        "has more boxes to process and postprocessing gets *slower*. At a",
+        "deployment threshold the effect can reverse: degradation pushes",
+        "confidences below the bar, fewer boxes reach NMS, and the pipeline gets",
+        "**faster because it sees less**.",
         "",
-        "**This reverses at the deployment threshold.** Measured at conf 0.25 on",
-        "the demo clip, heavy rain drops detections 64.7 -> 30.1 per frame and",
-        "NMS cost 3.1 -> 1.8 ms: the pipeline gets **faster because it sees",
-        "less**. Operationally that is the worse failure of the two — latency",
-        "telemetry looks healthy at exactly the moment the system goes blind,",
-        "and the vehicle count falls, so a congestion monitor reads 'normal'",
-        "when the truth is 'cannot see'.",
+        "That second case is the more dangerous one operationally — latency",
+        "telemetry looks healthy at exactly the moment the detector is going",
+        "blind, and since the vehicle count falls too, a congestion monitor",
+        "reads 'normal' when the truth is 'cannot see'.",
         "",
-        "Any claim about the latency cost of degradation must therefore state",
-        "the confidence threshold it was measured at.",
+        "Any claim about the latency cost of degradation must state the",
+        "confidence threshold it was measured at **and the model it was measured",
+        f"on** — this report covers `{meta['model']}` only. Deployment-threshold",
+        "figures come from a separate run of",
+        "`scripts/make_comparison_video.py`, which writes its own CSV.",
+        "",
+        _latency_caveat(df),
         "",
         f"![double penalty]({args.img_prefix}fig_degradation_cost.png)",
         "",
