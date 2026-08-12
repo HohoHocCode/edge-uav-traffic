@@ -126,7 +126,13 @@ def main() -> int:
     ap.add_argument("--conf", type=float, default=0.001,
                     help="low for AP; raise only for a deployment-threshold row")
     ap.add_argument("--iou", type=float, default=0.65)
-    ap.add_argument("--max-det", type=int, default=300)
+    ap.add_argument("--max-det", type=int, default=500,
+                    help="VisDrone's official protocol evaluates at maxDets=500, "
+                         "not COCO's 100. On this split the cap binds -- mean "
+                         "detections/image rises 231 -> 327 -- but the extra "
+                         "candidates are low-confidence and move AP by +0.0008. "
+                         "Declared per row regardless, because a maxDets left "
+                         "unstated makes two AP figures incomparable")
     ap.add_argument("--limit", type=int, default=0, help="0 = all images")
     ap.add_argument("--conditions", nargs="*", default=["clean"])
     ap.add_argument("--all-conditions", action="store_true")
@@ -177,6 +183,7 @@ def main() -> int:
             "imgsz": args.imgsz,
             "conf_thres": args.conf,
             "iou_thres": args.iou,
+            "max_det": args.max_det,
             "n_images": len(samples),
             "tag": args.tag,
         })
