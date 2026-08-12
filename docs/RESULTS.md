@@ -44,12 +44,22 @@ with resolution, `post` with scene density.
 
 ![latency](fig_latency_split.png)
 
-## 3. The double penalty
+## 3. Degradation cost — and why it flips with the threshold
 
-Degradation does not only cost accuracy. Noise creates spurious
-candidates that survive the confidence threshold, so NMS on the Kryo
-cores has more boxes to process: the model is least accurate exactly
-when it is also slowest.
+At the AP-measurement threshold (conf 0.001) rain creates
+spurious candidates that survive scoring, so NMS on the CPU has more
+boxes to process and postprocessing gets *slower*.
+
+**This reverses at the deployment threshold.** Measured at conf 0.25 on
+the demo clip, heavy rain drops detections 64.7 -> 30.1 per frame and
+NMS cost 3.1 -> 1.8 ms: the pipeline gets **faster because it sees
+less**. Operationally that is the worse failure of the two — latency
+telemetry looks healthy at exactly the moment the system goes blind,
+and the vehicle count falls, so a congestion monitor reads 'normal'
+when the truth is 'cannot see'.
+
+Any claim about the latency cost of degradation must therefore state
+the confidence threshold it was measured at.
 
 ![double penalty](fig_degradation_cost.png)
 
@@ -67,3 +77,12 @@ when it is also slowest.
 | people | 0.0815 |
 | awning-tricycle | 0.0517 |
 | bicycle | 0.0254 |
+
+## 5. Latency ladder (synthetic load)
+
+| backend | imgsz | candidates | infer ms | post ms | total ms | FPS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `onnxruntime-cpu` | 640 | 50 | 47.95 | 1.92 | 49.87 | 20.1 |
+| `onnxruntime-cpu` | 640 | 150 | 47.95 | 4.21 | 52.16 | 19.2 |
+| `onnxruntime-cpu` | 640 | 300 | 47.95 | 9.01 | 56.97 | 17.6 |
+| `onnxruntime-cpu` | 640 | 600 | 47.95 | 19.82 | 67.78 | 14.8 |

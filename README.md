@@ -50,17 +50,42 @@ claim believable.
   actually exposes. If the board has no energy counter, the tool says so
   instead of reporting a zero. See `4-bench/probe_power.py`.
 
-Early result from the validation split, which is the reason the robustness axis
-exists at all:
+### Results — VisDrone-DET val, 548 images, all ten conditions
 
-| condition | AP | APs (small objects) |
-|---|---|---|
-| clean | reference | reference |
-| rain (medium) | −14 % | **−39 %** |
+The detector was fine-tuned on clean imagery only. That is the point of the
+table: it measures what a conventionally-trained model does when it actually
+has to fly.
 
-Rain costs small objects roughly three times what it costs the headline
-number — and on aerial footage 69 % of all objects are small. A single AP
-figure hides exactly the failure that matters.
+| condition | AP kept | APs kept | | condition | AP kept | APs kept |
+|---|---:|---:|---|---|---:|---:|
+| `bright_up` | 97 % | 99 % | | `rain_light` | 82 % | 78 % |
+| `fog_medium` | 94 % | 95 % | | `blur_medium` | 73 % | **60 %** |
+| `bright_down` | 93 % | 89 % | | `rain_medium` | 52 % | 51 % |
+| `blur_light` | 93 % | 89 % | | `rain_heavy` | **17 %** | 20 % |
+| `bright_down_heavy` | 86 % | 82 % | | | | |
+
+Three findings, all of which contradict the obvious expectation:
+
+**Only rain actually breaks it.** Every other condition stays above 73 %.
+A clean-trained model turns out to be far more robust to exposure — the thing
+augmentation recipes emphasise — than to precipitation, which they usually omit.
+If you can only augment one thing, augment rain.
+
+**Blur is what destroys small objects.** `blur_medium` keeps 73 % of AP but only
+60 % of APs. At 640 input, a 20-pixel object under a 9-pixel kernel is gone.
+69 % of objects in this split are small, so the headline AP understates it.
+
+**The latency penalty flips sign with the confidence threshold.** At the AP
+protocol (`conf 0.001`) rain raises CPU postprocessing 85 %, because streaks
+manufacture candidates that clear the threshold. At the deployment threshold
+(`conf 0.25`) the same rain *lowers* NMS cost 37 % — the pipeline gets faster
+because it sees less. Operationally that is the worse of the two: latency
+telemetry looks healthy exactly when the detector is going blind. See
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+
+<p align="center">
+  <img src="docs/img/robustness.png" alt="AP and APs across ten degradation conditions" width="860">
+</p>
 
 ---
 
@@ -130,8 +155,42 @@ python 4-bench/bench_latency.py --model models/yolov8n_visdrone_640.onnx
 
 # full robustness table: 10 conditions over 548 images
 python 4-bench/bench_quality.py --model models/yolov8n_visdrone_640.onnx \
-    --all-conditions --out results/quality.csv
+    --all-conditions --out results/quality_mask.csv
+
+# tables + figures
+python 4-bench/report.py --quality results/quality_mask.csv \
+    --latency results/latency.csv --out results/report
+
+# side-by-side demo video: same model, clean vs degraded
+python scripts/make_comparison_video.py --condition rain_heavy \
+    --out results/compare_rain_heavy.mp4
 ```
+
+The NMS tail, measured at four candidate loads on the host CPU — this is the
+cost that a FLOPs table never shows:
+
+| surviving candidates | 50 | 150 | 300 | 600 |
+|---|---:|---:|---:|---:|
+| `post_ms` | 1.92 | 4.21 | 9.01 | 19.82 |
+
+Slightly superlinear, and VisDrone val averages 70.7 annotated objects per
+image with the busiest frames well past 300.
+
+### Closing the loop
+
+The table says rain is the failure. [`1-model/finetune_weather.py`](1-model/finetune_weather.py)
+is the intervention: it injects the *same* degradation functions the benchmark
+uses as a training-time callback, so the training and evaluation distributions
+come from identical code and an improvement cannot be an artefact of two
+different rain models.
+
+```bash
+python 1-model/finetune_weather.py --weights models/yolov8n_visdrone.pt \
+    --data VisDrone.yaml --epochs 60 --degrade-prob 0.35
+```
+
+Re-running `bench_quality.py` on the result gives a before/after pair on an
+identical protocol.
 
 Every benchmark row carries the model hash, the backend, the resolution, the
 condition id and the ignore-region policy. A number without those cannot be
@@ -155,7 +214,14 @@ Stated up front, because a benchmark that hides these is not worth reading.
   study, not an architecture comparison.
 - The NPU path requires `onnxruntime-qnn` plus the QAIRT libraries on the
   device. Where a row was measured on the Kryo CPU instead, the `backend`
-  column says so.
+  column says so. **Every number currently in this repository is a CPU
+  number** — the board was not reachable at the time of measurement.
+- **The congestion monitor inherits the detector's blindness.** In heavy rain
+  the vehicle count falls because detection fails, not because traffic
+  cleared, and the dashboard will report "normal" with healthy-looking
+  latency. Nothing in the current pipeline distinguishes an empty road from a
+  road it cannot see. A deployment would need a capture-quality signal
+  independent of the detector before this alert could be trusted.
 
 ## License
 

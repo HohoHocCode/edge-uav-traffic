@@ -30,6 +30,29 @@ at 640, and evaluating it elsewhere measures the resize, not the model.
 surviving candidates on the Kryo cores. A benchmark that reports only
 `infer_ms` describes a system nobody can deploy.
 
+### The postprocessing cost flips sign with the confidence threshold
+
+Measured on VisDrone val at the AP protocol (`conf 0.001`), heavy rain raises
+`post_ms` from 20.0 to 37.1 (+85%): rain streaks manufacture high-frequency
+structure that scores above 0.001, so more candidates reach NMS.
+
+Measured on the demo clip at the deployment threshold (`conf 0.25`), the same
+condition *lowers* NMS cost from 3.1 to 1.8 ms (−37%), because rain pushes
+confidences below 0.25 and the boxes never reach NMS at all. Detections fall
+64.7 → 30.1 per frame over the same footage.
+
+Both numbers are real and they are not in conflict — they measure different
+operating points. The consequence for deployment is the uncomfortable one:
+
+> In heavy rain the pipeline gets **faster because it sees less**. Latency and
+> FPS telemetry look healthier at precisely the moment the detector is failing,
+> and because the vehicle count also falls, a congestion monitor reads
+> "normal" when the truth is "cannot see".
+
+A health signal for this system therefore cannot be built from latency alone.
+Any statement about the latency cost of degradation must name the confidence
+threshold it was measured at; this repository does so on every row.
+
 ## Scene density is the hidden variable
 
 Postprocessing cost tracks the number of surviving candidates, which tracks
