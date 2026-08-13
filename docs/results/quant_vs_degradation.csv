@@ -1,0 +1,11 @@
+condition,AP_fp32,AP_w8a16,AP_quant_cost_pct,APs_fp32,APs_w8a16,APs_quant_cost_pct,device,precision_pair,n_images,conf_thres,iou_thres,max_det,ignore_policy,calib_sha256_16
+clean,0.1714,0.1683,-1.81,0.0756,0.073,-3.44,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+rain_light,0.1402,0.1347,-3.92,0.0591,0.0554,-6.26,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+rain_medium,0.089,0.0867,-2.58,0.0387,0.0363,-6.2,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+rain_heavy,0.0295,0.0274,-7.12,0.0149,0.0134,-10.07,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+bright_down,0.1593,0.1562,-1.95,0.0672,0.0658,-2.08,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+bright_down_heavy,0.148,0.1459,-1.42,0.0621,0.0608,-2.09,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+bright_up,0.1669,0.163,-2.34,0.0746,0.0719,-3.62,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+blur_light,0.1602,0.157,-2.0,0.0674,0.0668,-0.89,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+blur_medium,0.1254,0.1237,-1.36,0.045,0.0447,-0.67,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a
+fog_medium,0.1618,0.1578,-2.47,0.0719,0.0686,-4.59,QCS8550,fp32 -> w8a16,548,0.001,0.65,500,mask,d80e49589bd7ea0a

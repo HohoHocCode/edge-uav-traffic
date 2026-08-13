@@ -109,7 +109,58 @@ which is which.
 
 ---
 
-## 6. What still needs stating with each row
+## 6. Quantization costs more in the rain — and only in the rain
+
+Every published quantization table this project could find measures accuracy
+loss on clean imagery. A drone does not fly in clean imagery. Running the same
+ten-condition protocol on the w8a16 model and differencing against fp32 asks
+whether the clean figure is the figure that matters.
+
+| Condition | AP fp32 | AP w8a16 | Quantization cost | APs cost |
+|---|---:|---:|---:|---:|
+| `clean` | 0.1714 | 0.1683 | **−1.8 %** | −3.4 % |
+| `rain_light` | 0.1402 | 0.1347 | −3.9 % | −6.3 % |
+| `rain_medium` | 0.0890 | 0.0867 | −2.6 % | −6.2 % |
+| `rain_heavy` | 0.0295 | 0.0274 | **−7.1 %** | **−10.1 %** |
+| `bright_down` | 0.1593 | 0.1562 | −1.9 % | −2.1 % |
+| `bright_down_heavy` | 0.1480 | 0.1459 | −1.4 % | −2.1 % |
+| `bright_up` | 0.1669 | 0.1630 | −2.3 % | −3.6 % |
+| `blur_light` | 0.1602 | 0.1570 | −2.0 % | −0.9 % |
+| `blur_medium` | 0.1254 | 0.1237 | −1.4 % | **−0.7 %** |
+| `fog_medium` | 0.1618 | 0.1578 | −2.5 % | −4.6 % |
+
+![quantization vs degradation](img/fig_quant_degradation.png)
+
+**The clean number understates heavy rain by 3.9× on AP and 2.9× on APs.**
+Quoting −1.8 % as "the cost of quantization" describes a condition the
+aircraft is not in.
+
+The sharper result is that the amplification is **specific to rain**.
+Exposure sits at the clean cost. Fog is barely above it. Blur is *below* it —
+`blur_medium` loses only 0.7 % of APs to quantization against clean's 3.4 %.
+
+A mechanism that fits all three: rain *adds* high-frequency structure, which
+manufactures detections near the confidence boundary, and quantization noise
+flips exactly those. Blur *removes* high-frequency detail, leaving fewer
+marginal candidates for quantization to disturb — which is why it is the one
+condition where quantization hurts less than on clean data. Exposure changes
+are close to monotone per pixel and move the boundary population hardly at
+all.
+
+Practical consequence: on a platform that must fly in rain, the deployment
+choice is not "w8a16 costs 1.8 %". It is "w8a16 costs 1.8 % on a good day and
+7 % on a bad one, in exactly the conditions where 7 % is least affordable".
+
+**Caveat, stated because the percentage invites over-reading.** At
+`rain_heavy` the absolute AP is small (0.0295 → 0.0274), so a 7.1 % relative
+change is an absolute change of 0.0021. Percentages on a small base are
+fragile. The *direction* is consistent across all three rain severities and
+across both AP and APs, and the contrast with blur is large; the exact
+multiple is not the claim, the ordering is.
+
+---
+
+## 7. What still needs stating with each row
 
 - `estimated_inference_time` from AI Hub is **compute only** — no camera
   capture, no letterbox, no NMS, no tracking. The frame-budget table is the
