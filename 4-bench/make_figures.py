@@ -118,8 +118,8 @@ def fig_quant_trap(root, out):
 
     ax.set_xticks(x)
     ax.set_xticklabels([p.upper() for p in prec])
-    ax.set_ylabel("Latency trên QCS8550 (ms)")
-    ax.set_title("Precision nhanh nhất là precision không dùng được")
+    ax.set_ylabel("Latency on QCS8550 (ms)")
+    ax.set_title("The fastest precision is the one that does not work")
     # lat[] is already in ms -- dividing again here put the ceiling at 1.0 while
     # the bars reached 6.9, which pushed every label outside the axes and made
     # tight-bbox blow the canvas up to 5000 px tall.
@@ -129,13 +129,13 @@ def fig_quant_trap(root, out):
     handles = [Patch(facecolor=c, edgecolor=c, label=n)
                for (n, _, _), c in zip(models, [BLUE, ORANGE, GREEN, PURPLE])]
     handles.append(Patch(facecolor="white", edgecolor=RED, hatch="///",
-                         label="✗ output hỏng hoàn toàn"))
+                         label="\u2717 output broken"))
     handles.append(Patch(facecolor=GREY, edgecolor=RED, hatch="..", alpha=.55,
-                         label="! suy giảm nặng (<70% box)"))
+                         label="! severely degraded (<70% boxes)"))
     ax.legend(handles=handles, loc="upper left", ncol=2, fontsize=11.5)
 
-    ax.text(0.5, -0.17, "Chỉ cột đặc mới dùng được. Mọi ô đều zero operator "
-            "fallback — latency đẹp không nói lên model còn hoạt động.",
+    ax.text(0.5, -0.17, "Only solid bars are usable. Every cell has zero operator "
+            "fallback -- good latency says nothing about detection.",
             transform=ax.transAxes, ha="center", fontsize=11, color=GREY)
     p = os.path.join(out, "fig_quant_trap.png")
     fig.savefig(p); plt.close(fig)
@@ -147,11 +147,11 @@ def fig_e2e_matrix(root, out):
     """Where the decode lives x precision -> which failure appears."""
     fig, ax = plt.subplots(figsize=(9.4, 4.8))
     cols = ["W8A8", "W8A16", "W16A16", "W4A16"]
-    rws = ["end2end\n(decode TRONG graph)", "không end2end\n(decode NGOÀI graph)"]
+    rws = ["end2end\n(decode INSIDE graph)", "no end2end\n(decode OUTSIDE graph)"]
     state = [[2, 1, 1, 1],
-             [2, 0, 3, 3]]                     # 0 ok, 1 box, 2 conf, 3 chưa đo
-    label = [["conf→0", "box→điểm", "box→điểm", "box→điểm"],
-             ["conf→0", "CHẠY TỐT", "—", "—"]]
+             [2, 0, 3, 3]]                     # 0 ok, 1 box, 2 conf, 3 not measured
+    label = [["conf\u21920", "box\u2192point", "box\u2192point", "box\u2192point"],
+             ["conf\u21920", "WORKS", "\u2014", "\u2014"]]
     colour = {0: GREEN, 1: RED, 2: ORANGE, 3: "#F2F2F2"}
 
     for i in range(2):
@@ -167,15 +167,15 @@ def fig_e2e_matrix(root, out):
     ax.set_xlim(0, 4); ax.set_ylim(0, 2)
     ax.set_xticks(np.arange(4) + .5); ax.set_xticklabels(cols)
     ax.set_yticks(np.arange(2) + .5); ax.set_yticklabels(rws[::-1], fontsize=12)
-    ax.set_title("Cùng model, cùng calibration — chỉ khác chỗ đặt phép decode")
+    ax.set_title("Same weights, same calibration -- only where the decode lives")
     ax.grid(False)
     for s in ax.spines.values():
         s.set_visible(False)
     ax.tick_params(length=0)
-    ax.text(0.5, -0.22, "YOLO26 bỏ NMS bằng cách đưa decode vào graph. Phép cộng "
-            "offset lưới anchor (0–640) với khoảng cách hồi quy\ncần dải động lớn "
-            "hơn một scale int16 giữ được — nên box sập, trong khi confidence vẫn "
-            "khớp fp32 tới 0.999.",
+    ax.text(0.5, -0.22, "YOLO26 removes NMS by moving the decode into the graph. Anchor-grid "
+            "offsets spanning 0-640 added to regressed distances\nneed more dynamic "
+            "range than one int16 scale holds -- boxes collapse, while confidence "
+            "still tracks fp32 at 0.999.",
             transform=ax.transAxes, ha="center", fontsize=11, color=GREY)
     p = os.path.join(out, "fig_e2e_matrix.png")
     fig.savefig(p); plt.close(fig)
@@ -196,7 +196,7 @@ def fig_models(root, out):
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.6))
     specs = [("AP", "AP (IoU .50:.95)", BLUE),
              ("AP50", "AP50", ORANGE),
-             ("APs", "APs — vật thể nhỏ", GREEN)]
+             ("APs", "APs -- small objects", GREEN)]
     for k, (ax, (key, title, col)) in enumerate(zip(axes, specs)):
         vals = [num(r[key]) for r in rs]
         bars = ax.barh(labels[::-1], vals[::-1], color=col, height=.6, zorder=3)
@@ -215,7 +215,7 @@ def fig_models(root, out):
         if k:
             ax.set_yticklabels([])
             ax.tick_params(axis="y", length=0)
-    fig.suptitle("548 ảnh → 2.192 ô, cùng decoder, cùng bộ AP",
+    fig.suptitle("548 images -> 2,192 tiles, one decoder, one AP implementation",
                  fontsize=16, fontweight="bold", y=1.03)
     p = os.path.join(out, "fig_models.png")
     fig.savefig(p); plt.close(fig)
@@ -230,7 +230,7 @@ def fig_tiling(root, out):
     un = next(r for r in rs if r["mode"] == "untiled")
     ti = next(r for r in rs if r["mode"] != "untiled")
 
-    keys = [("AP", "AP"), ("AP50", "AP50"), ("APs", "APs\n(vật thể nhỏ)")]
+    keys = [("AP", "AP"), ("AP50", "AP50"), ("APs", "APs\n(small objects)")]
     gains = [(num(ti[k]) - num(un[k])) / num(un[k]) * 100 for k, _ in keys]
 
     fig, ax = plt.subplots(figsize=(8.6, 5.0))
@@ -240,13 +240,13 @@ def fig_tiling(root, out):
         ax.text(b.get_x() + b.get_width() / 2, g + 1.6, f"+{g:.1f}%",
                 ha="center", fontsize=15, fontweight="bold",
                 color=GREEN if g == max(gains) else INK)
-    ax.set_ylabel("Cải thiện so với không cắt ô (%)")
-    ax.set_title("Cắt ô 2×2 chồng lấn 20%: lợi ích dồn vào vật thể nhỏ")
+    ax.set_ylabel("Improvement over untiled (%)")
+    ax.set_title("Tiling 2x2, 20% overlap: the gain lands on small objects")
     ax.set_ylim(0, max(gains) * 1.28)
     ax.axhline(0, color="#B0B0B0", linewidth=.9)
     ax.grid(axis="x", visible=False)
-    ax.text(0.5, -0.16, "Đó là bằng chứng cơ chế đúng: vật thể đến network to hơn "
-            "1.80×. Giá phải trả là 3.95× thời gian.",
+    ax.text(0.5, -0.16, "Evidence for the mechanism: objects arrive 1.80x larger at the "
+            "network. The price is 3.95x the time.",
             transform=ax.transAxes, ha="center", fontsize=11.5, color=GREY)
     p = os.path.join(out, "fig_tiling.png")
     fig.savefig(p); plt.close(fig)
@@ -264,15 +264,15 @@ def fig_power(root, out):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.4, 4.8),
                                  gridspec_kw={"width_ratios": [1, 1.15]})
     x = np.arange(1)
-    a1.bar(x - .17, [idle[0]], .32, yerr=[6.0], color=BLUE, label="rảnh", zorder=3,
+    a1.bar(x - .17, [idle[0]], .32, yerr=[6.0], color=BLUE, label="idle", zorder=3,
            capsize=5, error_kw={"linewidth": 1.4})
-    a1.bar(x + .17, [load[0]], .32, yerr=[6.1], color=ORANGE, label="tải 6 lõi",
+    a1.bar(x + .17, [load[0]], .32, yerr=[6.1], color=ORANGE, label="6-core load",
            zorder=3, capsize=5, error_kw={"linewidth": 1.4})
     a1.set_xticks(x); a1.set_xticklabels(["battery rail"])
-    a1.set_ylabel("Công suất (mW)")
+    a1.set_ylabel("Power (mW)")
     a1.set_ylim(470, 540)
     a1.legend(fontsize=12)
-    a1.set_title("Chênh +1.6 mW, nhiễu ±6.0 mW", fontsize=14)
+    a1.set_title("Delta +1.6 mW against 6.0 mW of noise", fontsize=14)
     a1.grid(axis="x", visible=False)
 
     # The bars are near zero on purpose, which on a 0..6 axis makes them look
@@ -285,17 +285,17 @@ def fig_power(root, out):
         a2.text(max(s, 0.04) + .15, b.get_y() + b.get_height() / 2, f"{s:.1f}σ",
                 va="center", fontsize=13, fontweight="bold", color=RED)
     a2.axvline(5, color=GREEN, linewidth=2.2, linestyle="--", zorder=4)
-    a2.text(4.85, 2.62, "ngưỡng dùng được\n(5σ)", color=GREEN, fontsize=11.5,
+    a2.text(4.85, 2.62, "usable\nthreshold", color=GREEN, fontsize=11.5,
             ha="right", va="top", fontweight="bold")
-    a2.text(2.5, 2.62, "vùng không phân giải được", color=RED, fontsize=11.5,
+    a2.text(2.5, 2.62, "cannot resolve load", color=RED, fontsize=11.5,
             ha="center", va="top")
     a2.set_xlim(0, 6.4)
     a2.set_ylim(-0.6, 2.9)
-    a2.set_xlabel("Tách biệt tải / rảnh, tính bằng σ của trạng thái rảnh")
-    a2.set_title("Cả ba nguồn đều không phân giải được tải", fontsize=14)
+    a2.set_xlabel("Load/idle separation, in sigma of the idle state")
+    a2.set_title("None of the three resolves load", fontsize=14)
     a2.grid(axis="y", visible=False)
 
-    fig.suptitle("QCS8550 dev kit: có 3 counter điện năng, không dùng được cái nào",
+    fig.suptitle("QCS8550 dev kit: three power counters, none of them instrumentation",
                  fontsize=15.5, fontweight="bold", y=1.02)
     p = os.path.join(out, "fig_power.png")
     fig.savefig(p); plt.close(fig)
@@ -324,7 +324,7 @@ def fig_tradeoff(root, out):
     cols = {"v8n-base": BLUE, "v11n-base": ORANGE,
             "v26n-base": GREEN, "v26n-p2": PURPLE}
     for ax, key, title in ((a1, "AP", "AP (IoU .50:.95)"),
-                           (a2, "APs", "APs — vật thể nhỏ")):
+                           (a2, "APs", "APs -- small objects")):
         for r in rs:
             n = nm.get(r["model"], r["model"])
             x, y = lat[n], num(r[key])
@@ -343,15 +343,15 @@ def fig_tradeoff(root, out):
         pad = (max(ys) - min(ys)) * .45 or .01
         ax.set_ylim(min(ys) - pad, max(ys) + pad * 1.5)
         ax.set_xlim(2.4, 9.8)
-        ax.set_xlabel("Latency NPU w8a16 (ms/ô)")
+        ax.set_xlabel("NPU w8a16 latency (ms/tile)")
         ax.set_title(title, fontsize=14)
 
     a1.set_ylabel("AP")
-    fig.suptitle("Đánh đổi: p2 chính xác nhất, và chậm nhất 2.1×",
+    fig.suptitle("The trade: p2 is the most accurate, and 2.1x the slowest",
                  fontsize=16, fontweight="bold", y=1.0)
-    fig.text(0.5, -0.03, "Trục dọc đo tại chỗ trên 2.192 ô; trục ngang đo trên "
-             "QCS8550 qua AI Hub. Cột ms/ô trên host bị bỏ đi vì nó lệch 25% "
-             "giữa hai lần chạy cùng một model.",
+    fig.text(0.5, -0.03, "Vertical axis measured locally on 2,192 tiles; horizontal on QCS8550 "
+             "via AI Hub. Host ms/tile is omitted -- it moved 25% between two runs "
+             "of the same model.",
              ha="center", fontsize=11, color=GREY)
     p = os.path.join(out, "fig_tradeoff.png")
     fig.savefig(p); plt.close(fig)
@@ -372,7 +372,7 @@ def fig_budget(root, out):
                                     "board_cpu_cold.json")))
     npu, tiles = 3.984, 4          # v8n w8a16 on AI Hub's QCS8550
     parts = [("NPU w8a16 (AI Hub)", npu, BLUE),
-             ("tiền xử lý (board)", b["pre_ms"], GREEN),
+             ("preprocess (board)", b["pre_ms"], GREEN),
              ("decode + NMS (board)", b["post_ms"], ORANGE)]
 
     fig, ax = plt.subplots(figsize=(10.6, 4.4))
@@ -387,16 +387,16 @@ def fig_budget(root, out):
     ax.set_yticks([])
     ax.set_ylim(-.75, .95)
     ax.set_xlim(0, left * 1.06)
-    ax.set_xlabel("ms cho một khung hình (4 ô)")
+    ax.set_xlabel("ms per frame (4 tiles)")
     ax.set_title(f"Frame budget: {left:.1f} ms  →  ~{1000 / left:.0f} FPS")
     ax.grid(axis="y", visible=False)
     ax.legend(handles=[Patch(facecolor=c, label=n) for n, _, c in parts],
               loc="upper center", ncol=3, fontsize=11.5,
               bbox_to_anchor=(.5, 1.03))
     ax.text(0.5, -0.42,
-            "NPU đo trên thiết bị đám mây của AI Hub; hai khâu CPU đo trên chính "
-            "board.\nBinary AI Hub không nạp được trên board (QAIRT 2.28 vs 2.45), "
-            "nên cột NPU là cận dưới chưa kiểm chứng tại chỗ.",
+            "NPU on AI Hub cloud device; both CPU stages on the board itself.\n"
+            "AI Hub binaries do not load on this board (QAIRT 2.28 vs 2.45), so "
+            "the NPU segment is an unverified lower bound.",
             transform=ax.transAxes, ha="center", fontsize=11, color=GREY)
     p = os.path.join(out, "fig_budget.png")
     fig.savefig(p); plt.close(fig)

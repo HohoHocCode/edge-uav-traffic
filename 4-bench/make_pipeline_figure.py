@@ -73,8 +73,8 @@ def main() -> int:
     # the numbers printed on it.
     stages = [
         ("Camera",        None,          "1080p",            GREY,   1.45),
-        ("Cắt 4 ô",       None,          "chồng lấn 20%",    GREY,   1.55),
-        ("Tiền xử lý",    pre_ms * tiles, "letterbox, CHW",  ORANGE, None),
+        ("Tile x4",       None,          "20% overlap",      GREY,   1.55),
+        ("Preprocess",    pre_ms * tiles, "letterbox, CHW",  ORANGE, None),
         ("NPU  w8a16",    npu_ms * tiles, "Hexagon V73",     BLUE,   None),
         ("Decode + NMS",  post_ms * tiles, "Kryo CPU",       ORANGE, None),
         ("Tracker",       None,          "ByteTrack",        GREEN,  1.45),
@@ -107,18 +107,18 @@ def main() -> int:
     ax.plot([a, a, z, z], [y + h + .18, y + h + .34, y + h + .34, y + h + .18],
             color=INK, linewidth=1.4, zorder=3)
     ax.text((a + z) / 2, y + h + .50,
-            f"{total:.1f} ms mỗi khung hình  →  ~{1000/total:.0f} FPS",
+            f"{total:.1f} ms per frame  ->  ~{1000/total:.0f} FPS",
             ha="center", fontsize=15, fontweight="bold")
 
     share = post_ms * tiles / total * 100
     ax.text(x / 2, y - 0.85,
-            f"NPU chỉ chiếm {npu_ms*tiles/total*100:.0f}% ngân sách; decode + NMS "
-            f"trên CPU chiếm {share:.0f}%.\n"
-            f"Bề rộng mỗi khối tỉ lệ với thời gian đo được — hình không thể "
-            f"mâu thuẫn với bảng số.",
+            f"The NPU is only {npu_ms*tiles/total*100:.0f}% of the budget; decode + NMS "
+            f"on the CPU is {share:.0f}%.\n"
+            f"Box width is proportional to measured time, so the drawing cannot "
+            f"disagree with the table.",
             ha="center", va="center", fontsize=11.5, color=GREY)
 
-    ax.text(0, y + h + .18, "  đo trên board", fontsize=10.5, color=GREY,
+    ax.text(0, y + h + .18, "  measured on board", fontsize=10.5, color=GREY,
             va="bottom")
 
     ax.set_xlim(-0.25, x + 0.1)
