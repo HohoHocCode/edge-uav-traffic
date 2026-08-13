@@ -165,9 +165,10 @@
     \begin{column}{0.46\textwidth}
       \begin{exampleblock}{Answer}
         \small
-        At an \textbf{18\,FPS} budget the extra 4.5\,ms costs about
-        \textbf{1.5\,FPS} --- P2 pays for itself. At a 30\,FPS target it would
-        not. \textbf{The frame-rate requirement decides, not the mAP table.}
+        Over the whole pipeline the extra 4.55\,ms/tile costs
+        \textbf{18.5 $\rightarrow$ 13.8\,FPS}, a \textbf{25\% throughput loss}.
+        Worth it if the requirement is $\sim$12\,FPS; not if it is 15 or more.
+        \textbf{The frame-rate requirement decides, not the mAP table.}
       \end{exampleblock}
     \end{column}
   \end{columns}
