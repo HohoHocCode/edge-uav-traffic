@@ -155,6 +155,40 @@ New-NetFirewallRule -DisplayName "SkySentry ingest" -Direction Inbound `
 
 ---
 
+## Disk layout — `data/` and `.venv/` are junctions
+
+On this workstation the C: drive filled to zero bytes, so the two bulky
+directories live on D: and are reached through NTFS junctions:
+
+```
+C:\Users\ASUS\edge-uav-traffic\data   ->  D:\edge-uav-traffic\data
+C:\Users\ASUS\edge-uav-traffic\.venv  ->  D:\edge-uav-traffic\.venv
+```
+
+Every path in every script is unchanged — a junction is transparent, and
+`sys.prefix` still reports the C: path. Verified after the move: both splits
+load (548 val, 6471 train) and a 20-image `bench_quality.py` run reproduces.
+
+Two consequences worth knowing:
+
+- **`rm -rf` on the junction deletes the target's contents**, not just the
+  link. Use `Remove-Item` on the *link* only if you mean to unlink; to move
+  the data back, robocopy from D: first.
+- **New datasets belong on D:.** C: has single-digit GB free; D: has ~330 GB.
+  Point `--data` at `D:\...` directly rather than copying into the repo.
+
+### Regenerating what was deleted to make room
+
+All of these are reproducible; none is in git because of size.
+
+| Artefact | Size | Rebuild with |
+|---|---:|---|
+| Weather-augmented dataset | 4.9 GB | `2-augment/build_dataset.py` — seeded per image index, so it reproduces exactly. The file list it produced is kept at `docs/results/weather_dataset_manifest/manifest.csv` |
+| `results/calib/calibration.npy` | 1.5 GB | `1-model/make_calibration.py --n 64 --seed 0`; expected sha256 `d80e49589bd7ea0a` (recorded in QUANTIZATION.md §1) |
+| `results/device_in/` | 0.9 GB | `4-bench/make_device_inputs.py --limit 200` |
+| `results/device_out_*/` | 0.2 GB | re-run `qnn-net-run` on the board, ~1 min |
+| `models/_ctx/*.bin` | 11 MB | re-download from AI Hub compile jobs `j5w4kzomg` / `jp81nrvq5` |
+
 ## Known-good invariants
 
 Check these before recording a result:
