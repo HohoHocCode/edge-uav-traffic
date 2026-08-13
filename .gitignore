@@ -43,3 +43,6 @@ results/calib/
 
 # AI Hub compiled context binaries (11 MB; re-download from the job IDs in docs/QUANTIZATION.md)
 models/_ctx/
+
+# ONNX da train (10-12 MB moi cai; lay tu Drive hoac export lai)
+models/new/

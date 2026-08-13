@@ -136,8 +136,49 @@ class Yolov8Detector:
     def postprocess(
         self, raw: np.ndarray, gain: float, pad: tuple[float, float], src_shape: tuple[int, int]
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Decode a YOLOv8 head output of shape (1, 4+nc, A) or (1, A, 4+nc)."""
+        """Decode a detection head output.
+
+        Two shapes are accepted, and telling them apart matters more than it
+        looks:
+
+        ``(1, 4+nc, A)`` / ``(1, A, 4+nc)``
+            YOLOv8 / YOLO11. Raw cxcywh plus per-class scores over anchors;
+            needs decoding and NMS.
+
+        ``(1, N, 6)``
+            YOLO26. The head is end-to-end: boxes are already decoded to
+            ``[x1, y1, x2, y2, conf, cls]`` in letterboxed pixels and already
+            de-duplicated, so running NMS again would be wrong, not merely
+            wasteful.
+
+        The failure this guards against is silent. Passing a ``(1, N, 6)``
+        tensor through the anchor path yields ``nc = 6 - 4 = 2``, so it decodes
+        as a two-class model, reads the confidence column as a class score and
+        the class column as another, and returns plausible-looking garbage. No
+        exception, no warning -- just a low mAP that looks like a bad model.
+        """
         p = raw[0] if raw.ndim == 3 else raw
+
+        # (N, 6) end-to-end output. Checked before the transpose below, because
+        # a 6-wide tensor would otherwise be reoriented into the anchor layout.
+        if p.ndim == 2 and p.shape[1] == 6 and p.shape[0] != 6:
+            m = p[:, 4] >= self.conf_thres
+            xyxy = p[m, :4].astype(np.float32).copy()
+            conf = p[m, 4].astype(np.float32)
+            cls = p[m, 5].astype(np.int32)
+            if len(xyxy) > self.max_det:
+                keep = np.argsort(-conf)[: self.max_det]
+                xyxy, conf, cls = xyxy[keep], conf[keep], cls[keep]
+            padw, padh = pad
+            xyxy[:, [0, 2]] -= padw
+            xyxy[:, [1, 3]] -= padh
+            xyxy /= gain
+            h, w = src_shape
+            np.clip(xyxy[:, [0, 2]], 0, w, out=xyxy[:, [0, 2]])
+            np.clip(xyxy[:, [1, 3]], 0, h, out=xyxy[:, [1, 3]])
+            self.nc = int(cls.max()) + 1 if len(cls) else self.nc
+            return xyxy, conf, cls
+
         # Normalise orientation to (A, 4+nc): the anchor axis is the long one.
         if p.shape[0] < p.shape[1]:
             p = p.transpose(1, 0)

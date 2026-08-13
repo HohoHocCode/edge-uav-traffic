@@ -45,6 +45,7 @@ import cv2  # noqa: E402
 
 import degradations as D  # noqa: E402
 from detector import letterbox  # noqa: E402  <- the runtime's own function
+from tiled_detector import tile_rects  # noqa: E402
 from visdrone_data import load_split  # noqa: E402
 
 
