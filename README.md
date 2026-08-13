@@ -96,21 +96,159 @@ per-frame record in [`docs/results/compare_rain_heavy.csv`](docs/results/compare
 
 ---
 
+## On the silicon
+
+Everything in this section was executed on a physical QCS8550 (`product:kalama`,
+Android 13, QNN v2.45) or on Qualcomm AI Hub. Each table says which, because
+the two disagree and the disagreement is itself a result.
+
+### The fastest precision is the one that does not work
+
+Post-training quantization through AI Hub, profiled on QCS8550:
+
+| precision | inference | vs fp16 | ops on NPU | fallback | usable |
+|---|---:|---:|---|---:|---|
+| fp16 | 5.087 ms | 1.00× | 246 / 246 | **0** | ✅ |
+| **w8a16** | **3.977 ms** | **1.28×** | 248 / 248 | **0** | ✅ |
+| w8a8 | **1.993 ms** | **2.55×** | 248 / 248 | **0** | ❌ |
+
+Zero operator fallback in every configuration — the whole graph lands on the
+Hexagon, which is the thing a FLOPs table can never tell you.
+
+Then the accuracy check inverts the table. **w8a8 produces zero detections.**
+Not fewer — none. The failure is specific and therefore diagnosable: box
+regression survives quantization intact while the classification branch
+collapses to exactly zero. Per-tensor int8 fits one scale to a sigmoid output
+that is near-zero almost everywhere with a handful of sharp peaks, and the
+peaks do not survive it.
+
+Confirmed on our own board, not just on Qualcomm's: over 200 validation images
+the device emitted **16,800,000 class scores and every one is exactly 0.0**,
+while the box channels of the same tensors carry normal values.
+
+So the deployable speedup is **1.28×**, not the 2.55× the w8a8 row advertises.
+A quantization table that reports latency without checking that the model still
+detects anything recommends exactly the wrong configuration.
+
+### AP measured on the Hexagon, not simulated
+
+The board has no Python and cannot letterbox. For an offline split it does not
+need to: 200 val images were preprocessed once on the host, pushed as raw
+tensors, executed on the NPU, and the head outputs scored with the same
+decoder, NMS and AP code as every other row.
+
+| | AP | AP50 | APs |
+|---|---:|---:|---:|
+| host fp32 (ONNX Runtime) | 0.1647 | 0.2970 | 0.0902 |
+| **board fp16 (Hexagon)** | **0.1631** | **0.2947** | **0.0889** |
+| Δ | −0.98 % | −0.76 % | −1.44 % |
+| board w8a8 | 0.0000 | 0.0000 | 0.0000 |
+
+Within 1 % of the host figure, so the ten-condition robustness tables can be
+quoted as representative of the device rather than as a simulation of it.
+
+### Quantization costs more in the rain — and only in the rain
+
+Every published quantization table measures accuracy loss on clean imagery. A
+drone does not fly in clean imagery. Running the same ten-condition protocol on
+the w8a16 model and differencing against fp32:
+
+| condition | quantization cost (AP) | (APs) |
+|---|---:|---:|
+| `clean` | −1.8 % | −3.4 % |
+| **`rain_heavy`** | **−7.1 %** | **−10.1 %** |
+| `bright_up` | −2.3 % | −3.6 % |
+| **`blur_medium`** | −1.4 % | **−0.7 %** |
+
+The clean number understates heavy rain by **3.9×**. And the amplification is
+specific to rain: exposure sits at the clean cost, and blur is *below* it.
+A mechanism that fits all three — rain *adds* high-frequency structure, which
+manufactures detections near the confidence boundary, and quantization noise
+flips exactly those; blur *removes* it, leaving fewer marginal candidates to
+disturb.
+
+### The same binaries are 8× slower on our board than on AI Hub's
+
+| | AI Hub `QCS8550 (Proxy)` | our board | ratio |
+|---|---:|---:|---:|
+| fp16 | 5.087 ms | **39.84 ms** | 7.8× |
+| w8a8 | 1.993 ms | 21.18 ms | 10.6× |
+
+Four explanations were tested and eliminated: thermal (NSP at 33.7 °C), CPU
+contention (95 % idle), NPU clock policy (flat across five `perf_profile`
+settings) and host-side dtype conversion (`--use_native_input_files` unchanged).
+What survives is the harness — AI Hub reports the backend's graph-execute time,
+while `qnn-net-run` marshals tensors across the CPU↔DSP boundary every
+iteration. Stated as the surviving hypothesis, not a proven one.
+
+**For the frame budget, 39.84 ms is the number to plan against**, and 5.087 ms
+is the ceiling a zero-copy integration would be chasing.
+
+Full protocol and job IDs: [`docs/QUANTIZATION.md`](docs/QUANTIZATION.md).
+
+---
+
+## Tiled inference: +69.8 % on small objects
+
+A 1920×1080 frame letterboxed to 640 is scaled by 0.33, and mosaic augmentation
+halves it again during training — a 15 px pedestrian reaches the network at
+**2.5 px**, below what a stride-8 feature map can represent at all. Those labels
+ask for something the architecture cannot express, and no amount of extra
+training changes it.
+
+Cutting the frame 2×2 with 20 % overlap gives 1067×600 tiles that letterbox at
+0.60, so every object arrives **1.80× larger** regardless of its size.
+
+| | AP | AP50 | **APs** | ms/img |
+|---|---:|---:|---:|---:|
+| untiled | 0.2112 | 0.3372 | 0.0612 | 62.8 |
+| **tiled 2×2, overlap 0.20** | **0.2468** | **0.3943** | **0.1038** | 248.4 |
+| | **+16.8 %** | +16.9 % | **+69.8 %** | **3.95×** |
+
+**The gain concentrates in APs, which is what makes it believable.** The claimed
+mechanism is "small objects arrive larger", and small objects are where nearly
+all of it lands. A uniform improvement across all sizes would have meant
+something else was responsible.
+
+Merging the tiles is where this goes wrong quietly. A car bisected by a tile
+edge yields a confident half-car box whose IoU against the whole-car box from
+the neighbouring tile is around 0.5 — below any usable NMS threshold, so it
+survives as a duplicate. Dropping detections that touch an *interior* tile edge
+(the image border is exempt) is worth **+3.4 % AP and +8.5 % APs** on its own
+and removes 22.6 duplicate detections per image.
+
+[`docs/TILING.md`](docs/TILING.md) · [`3-pipeline/tiled_detector.py`](3-pipeline/tiled_detector.py)
+
+---
+
 ## Repository layout
 
 The directory names are the pipeline.
 
 ```
 0-setup/      find the board, deploy to it, probe its capabilities
-1-model/      export the fine-tuned checkpoint to ONNX
+1-model/      export to ONNX, build the PTQ calibration set
 2-augment/    deterministic weather / exposure / blur degradations
 3-pipeline/   detector -> tracker -> analytics -> telemetry -> overlay
-4-bench/      latency ladder, quality + robustness table, power probe
+              + tiled_detector.py: overlapping-crop inference and merge
+4-bench/      latency ladder, robustness table, tiling A/B, on-device eval
 5-server/     command post: ingest API + dashboard
 6-showcase/   GPU renders of the three video tasks, + the data a dashboard reads
+notebooks/    Colab: weather finetune, and the 4-architecture two-stage study
 scripts/      dataset fetch, demo clip synthesis
 configs/      every value that changes a reported number
 ```
+
+Documents, in the order they became true:
+
+| | |
+|---|---|
+| [`docs/BENCHMARK.md`](docs/BENCHMARK.md) | protocol: what each column means and why |
+| [`docs/QUANTIZATION.md`](docs/QUANTIZATION.md) | fp16 / w8a16 / w8a8 on QCS8550, with job IDs |
+| [`docs/TILING.md`](docs/TILING.md) | overlapping crops, measured rather than argued |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | board bring-up, written from the failures we hit |
+| [`docs/PLAN_REVIEW.md`](docs/PLAN_REVIEW.md) | which experiments were worth running |
+| [`docs/results/`](docs/results/) | every CSV behind every table above |
 
 ## Showcase renders — Tasks 2 / 4 / 5
 
@@ -316,12 +454,31 @@ Stated up front, because a benchmark that hides these is not worth reading.
 - The demo clip is synthesised by flying a virtual camera over VisDrone stills.
   Object motion within the scene is real; **camera motion is not**. No tracking
   accuracy claim is made from it.
-- Only one detector family is benchmarked (YOLOv8n). This is a deployment
-  study, not an architecture comparison.
-- The NPU path requires `onnxruntime-qnn` plus the QAIRT libraries on the
-  device. Where a row was measured on the Kryo CPU instead, the `backend`
-  column says so. **Every number currently in this repository is a CPU
-  number** — the board was not reachable at the time of measurement.
+- Only one detector family is benchmarked end-to-end (YOLOv8n). A four-way
+  comparison (v8n / v11n / v26n / v26n-p2) is set up in
+  [`notebooks/finetune_1model_colab.ipynb`](notebooks/finetune_1model_colab.ipynb)
+  but is not reported here yet.
+- **Provenance differs per table and is labelled per table.** Three places
+  produce numbers in this repository and they are not interchangeable:
+  Qualcomm AI Hub's `QCS8550 (Proxy)` (real V73 silicon in a cloud device farm,
+  but not our board), our physical QCS8550, and the host CPU. An earlier
+  revision of this README claimed every number was a CPU number; that is no
+  longer true, and the `measured_by` column in `docs/results/*.csv` is
+  authoritative.
+- **The host-simulated accuracy tables are validated, not assumed.** fp16 on
+  the real Hexagon lands within 1 % of the host figure on the same 200 images,
+  which is why the ten-condition sweep is quoted as representative rather than
+  re-run on-device for each condition.
+- **YOLO26 output is not backward compatible.** `yolo26n` and `yolo26n-p2` are
+  NMS-free and emit `(1, N, 6)` — already-decoded boxes — where v8/v11 emit
+  `(1, 4+nc, anchors)`. `3-pipeline/detector.py` decodes only the latter, so a
+  v26 model plugged in today fails silently rather than loudly. Each export
+  records its real output shape and a `pipeline_compatible` flag.
+- **Tiled inference has not been measured on the board.** At the harness figure
+  of 39.84 ms per forward pass, four tiles is ~159 ms of NPU time per frame
+  before preprocessing and merging — roughly 5 FPS. A zero-copy integration
+  would put the ceiling near 18 FPS. Neither has been measured end-to-end on
+  the device.
 - **The congestion monitor inherits the detector's blindness.** In heavy rain
   the vehicle count falls because detection fails, not because traffic
   cleared, and the dashboard will report "normal" with healthy-looking
