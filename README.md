@@ -32,6 +32,11 @@ repository is measured on the device rather than on a laptop.
 | Task 4 — multi-object tracking | ByteTrack + Kalman, dependency-free | `3-pipeline/tracker.py` |
 | Task 5 — crowd / vehicle counting | per-frame, per-ROI, per-class counting | `3-pipeline/analytics.py` |
 
+The device pipeline above is the deployable half. `6-showcase/` is the other
+one: the same model run on a GPU host over real VisDrone footage, producing an
+annotated video per task plus the per-frame CSV/JSON a dashboard can read.
+See [Showcase renders](#showcase-renders-tasks-2--4--5).
+
 On top of the tasks: directional line-crossing counts, a congestion level with
 hysteresis, an offline-first telemetry store, and a command-post dashboard.
 
@@ -102,9 +107,96 @@ The directory names are the pipeline.
 3-pipeline/   detector -> tracker -> analytics -> telemetry -> overlay
 4-bench/      latency ladder, quality + robustness table, power probe
 5-server/     command post: ingest API + dashboard
+6-showcase/   GPU renders of the three video tasks, + the data a dashboard reads
 scripts/      dataset fetch, demo clip synthesis
 configs/      every value that changes a reported number
 ```
+
+## Showcase renders — Tasks 2 / 4 / 5
+
+`3-pipeline/` is written for an aarch64 board with no torch. `6-showcase/` is
+the opposite constraint: an x86 host with an NVIDIA GPU, where the goal is a
+presentable render of real footage rather than a defensible latency number.
+
+```bash
+uv python install 3.12
+uv sync                                   # torch comes from the cu128 index
+uv run python 6-showcase/render_all.py --h264
+```
+
+Drop a clip into `video/` and each renderer writes three files:
+
+| | |
+|---|---|
+| `results/taskN_*.mp4` | source resolution, annotated, with a **temporary** readout burned in |
+| `results/taskN_*.csv` | one row per frame — Task 5 uses the same schema as the device telemetry |
+| `results/taskN_*.json` | the same rows plus `meta` (model hash, engine, imgsz, thresholds) and the class palette |
+
+The readout block is scaffolding, not the product — the dashboard is a web app
+that reads the JSON. `--no-stats` turns it off; nothing is lost, because
+everything on screen is also in the record.
+
+```bash
+# fast iteration: 10 seconds, one task
+uv run python 6-showcase/render_detection.py --start 0 --duration 10
+
+# what does the GPU actually do — 200 frames, no video written
+uv run python 6-showcase/render_detection.py --benchmark 200
+
+# board-parity comparison: the frozen ONNX graph on the CPU
+uv run python 6-showcase/render_detection.py --engine onnx --device cpu
+```
+
+### Camera motion is compensated, and it changes the answer
+
+The footage is shot from a moving UAV. Measured over 400 frames the camera
+translates a mean of **4.9 px/frame**, p95 **18.6 px**, ~1957 px cumulative —
+most of the frame width. Left uncorrected that is not noise, it is a wrong
+answer that looks right:
+
+- a **parked** car sweeps across a screen-fixed counting line and is counted as
+  traffic
+- trails get drawn on stationary vehicles, which reads as tracker failure
+- ByteTrack matches a Kalman prediction to a detection by IoU, and at 18–22 px
+  of camera motion a small object's predicted and observed boxes barely overlap,
+  so the identity is dropped and re-created
+
+`6-showcase/gmc.py` estimates one similarity transform per frame with sparse
+optical flow (`goodFeaturesToTrack` + `calcOpticalFlowPyrLK` +
+`estimateAffinePartial2D` under RANSAC, ~2.7 ms at quarter scale) and applies it
+to the Kalman state, the trails and the density accumulator. A track then counts
+as *moving* on its compensated velocity alone.
+
+Over the full 1560-frame clip the correction removes half the crossings:
+
+| `main_road` | forward | backward |
+|---|---:|---:|
+| screen-fixed line, uncompensated | 56 | 10 |
+| **moving objects only** | **27** | **8** |
+
+6.6 of 15.6 tracks per frame are actually moving; the rest is a market full of
+parked vehicles that the drone flies over. Both figures are written to the CSV
+(`line_*` and `xmov_*`) so the correction can be shown rather than asserted.
+`--no-gmc` turns it off.
+
+### Why 640 and not 1280
+
+The `.pt` runs under torch, which takes a dynamic input shape, so `--imgsz` is a
+real knob here — unlike the ONNX path, whose graph is frozen at 640×640. The
+obvious move was to raise it and recover small objects. Measured on this clip it
+does not work:
+
+| imgsz | det/frame @ conf 0.25 | det/frame @ conf 0.10 | model ms |
+|---|---:|---:|---:|
+| **640** | **17.8** | 17.7 | **6.3** |
+| 1280 | 17.1 | 20.8 | 12.6 |
+| 1600 | 17.1 | — | 18.3 |
+
+640 is where the model was fine-tuned, on VisDrone stills that were themselves
+letterboxed down to it. Running at 1280 presents objects at roughly twice the
+pixel size it learned, which moves the input *away* from the training
+distribution rather than revealing more of it. So 640 is the default: three
+times faster, no fewer detections, and comparable to `docs/RESULTS.md`.
 
 ## Quick start
 
