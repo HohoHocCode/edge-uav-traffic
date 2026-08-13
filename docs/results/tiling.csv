@@ -1,0 +1,7 @@
+mode,n_images,truncated_rule,AP,AP50,APs,det_per_image,ms_per_image,grid,overlap,model,split,conf,iou,max_det,backend
+untiled,60,drop,0.2112,0.3372,0.0612,256.1,62.8,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
+tiled-2x2-ov0.2,60,drop,0.2468,0.3943,0.1038,311.2,248.4,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
+untiled,40,drop,0.1713,0.2782,0.0659,252.6,62.7,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
+tiled-2x2-ov0.2,40,drop,0.2141,0.3505,0.1019,290.4,242.4,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
+untiled,40,keep,0.1713,0.2782,0.0659,252.6,63.8,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
+tiled-2x2-ov0.2,40,keep,0.2071,0.3425,0.0939,313.0,245.1,2x2,0.20,yolov8n_visdrone_640.onnx,VisDrone2019-DET-val,0.001,0.65,500,onnxruntime-cpu
