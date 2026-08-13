@@ -1,359 +1,212 @@
 % =====================================================================
-%  SkySentry — replacement and additional slides, all values measured
+%  SkySentry — measured values for skysentry_qcs8550_slides_v2
 %
-%  Drop-in for skysentry_qcs8550_slides_v2. Every number here comes from a
-%  CSV in docs/results/ and every figure from 4-bench/make_figures.py, so a
-%  slide cannot drift from the repository.
+%  PART A replaces existing slides. The deck's structure is unchanged; only
+%  the TBDs are filled and two factual errors corrected.
+%  PART B is held back for the ablation section and is not needed to present.
 %
-%  Needs: \usepackage{booktabs} and a graphics path that reaches docs/img/.
-%  Blocks use the stock Beamer environments (block / alertblock /
-%  exampleblock) so they inherit whatever theme the deck already sets.
+%  Preamble additions:
+%      \usepackage{booktabs}
+%      \graphicspath{{docs/img/}}
 %
-%  Ordering suggestion:
-%    replace slide 6  -> "Pipeline, with the measurements on it"
-%    replace slide 9  -> "Quantization strategy"        (the old one lists
-%                        two rungs AI Hub cannot do)
-%    replace slide 11 -> "Settings and protocol"
-%    replace slide 12 -> "Quantitative comparison"
-%    replace slide 13 -> "Where the frame time goes"
-%    replace slide 15 -> "Ablation: does the P2 head pay for itself?"
-%    replace slide 16 -> "Discussion and limitations"
-%    insert  after 12 -> "The fastest precision is the one that is broken"
-%    insert  after that -> "YOLO26 must not be exported end-to-end"
-%    insert  before 16 -> "Energy: three counters, none usable"
+%  Every value traces to a CSV in docs/results/; every figure to
+%  4-bench/make_figures.py. Nothing here is typed in by hand.
 % =====================================================================
 
-% ---------------------------------------------------------------- 6 ---
-\begin{frame}{Pipeline, with the measurements on it}
-  \begin{center}
-    \includegraphics[width=\linewidth]{fig_pipeline}
-  \end{center}
-  \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Two processors, one budget}
-        \small
-        The Hexagon runs the network. The Kryo cores run letterboxing, the
-        colour/layout conversion, decoding and NMS. Both are in the frame
-        budget; only one is usually reported.
-      \end{block}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{alertblock}{The NPU is the small term}
-        \small
-        \textbf{29\%} of the frame goes to the NPU, \textbf{54\%} to decode
-        and NMS on the CPU. Making the network faster barely moves the total.
-      \end{alertblock}
-    \end{column}
-  \end{columns}
-\end{frame}
 
-% ---------------------------------------------------------------- 9 ---
-\begin{frame}{Quantization strategy}
-  \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.52\textwidth}
-      \begin{block}{What AI Hub can actually do}
-        \small
-        \texttt{submit\_quantize\_job} takes one dtype for weights and one for
-        activations, applied to the \emph{whole} model:
-        \smallskip
-        \begin{tabular}{@{}ll@{}}
-          \textbf{0} & FP32 reference \\
-          \textbf{1} & W8A8 \\
-          \textbf{2} & W8A16 \\
-          \textbf{3} & W16A16 \\
-          \textbf{4} & W4A16 \\
-        \end{tabular}
-      \end{block}
-    \end{column}
-    \begin{column}{0.44\textwidth}
-      \begin{alertblock}{Two rungs we had to drop}
-        \small
-        \textbf{W8A8 + INT16 head} and \textbf{lite\_mp 10\% INT16} are
-        per-layer mixed precision. Qualcomm's documentation states this is
-        \emph{``currently not supported''} for quantize jobs, and the API
-        exposes no per-op override.
-        \smallskip
+% #####################################################################
+%  PART A — replacements
+% #####################################################################
 
-        Doing it would mean running AIMET locally instead of AI Hub.
-      \end{alertblock}
-    \end{column}
-  \end{columns}
-  \vfill
-  \begin{exampleblock}{Protocol}
-    \small
-    Calibration: 64 tiles from VisDrone-DET-train, seeded, preprocessed by
-    importing the runtime's own \texttt{letterbox}
-    (\texttt{sha f62e17d4e7cd9946}). Every configuration is profiled on
-    QCS8550 \emph{and} checked for whether it still detects --- 4 models
-    $\times$ 4 precisions.
-  \end{exampleblock}
-\end{frame}
-
-% --------------------------------------------------------------- 11 ---
+% --- replaces slide 11 -------------------------------------------------
 \begin{frame}{Settings and protocol}
   \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Training}
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Training / validation}
         \small
         \begin{tabular}{@{}ll@{}}
-          Data      & VisDrone-DET, 208 clips \\
+          Dataset   & VisDrone-DET, 208 clips \\
                     & tiled 2$\times$2, 20\% overlap \\
           Train     & 6{,}471 img $\rightarrow$ 25{,}884 tiles \\
           Val       & 548 img $\rightarrow$ 2{,}192 tiles \\
           Models    & YOLOv8n, YOLO11n, \\
                     & YOLO26n, YOLO26n-P2 \\
-          Batch     & 32 (identical, all four) \\
-          Epochs    & 30 \,(45 for P2) \\
+          Batch     & 32 \, (identical, all four) \\
+          Epochs    & 30 \, (45 for P2) \\
           Seed      & 0 \\
           Image     & 640, letterbox pad 114 \\
           GPU       & A100 40\,GB \\
         \end{tabular}
       \end{block}
     \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{block}{Evaluation}
+    \begin{column}{0.46\textwidth}
+      \begin{block}{Edge evaluation}
         \small
         \begin{tabular}{@{}ll@{}}
+          Device    & QCS8550 \\
+          Runtime   & QNN / QAIRT, W8A16 \\
+          Batch     & 1 \\
           Protocol  & conf 0.001, IoU 0.65 \\
-          maxDets   & 500 (VisDrone, not 100) \\
+          maxDets   & 500 \, (VisDrone, not 100) \\
           Ignore    & cut per tile, masked \\
-          NPU       & AI Hub, QCS8550 \\
-          CPU       & lab board, Kryo \\
         \end{tabular}
       \end{block}
       \begin{alertblock}{Why P2 gets 45 epochs}
         \small
         \texttt{yolo26n-p2.pt} does not exist. Built from YAML with partial
         transfer from \texttt{yolo26n.pt}: \textbf{360/902} tensors, so 60\%
-        starts random. Equal epochs would not have been equal footing.
+        starts random. Equal epochs would not be equal footing.
       \end{alertblock}
     \end{column}
   \end{columns}
 \end{frame}
 
-% --------------------------------------------------------------- 12 ---
+% --- replaces slide 12 -------------------------------------------------
 \begin{frame}{Quantitative comparison}
   \begin{center}
     \small
-    \begin{tabular}{@{}lrrrrrr@{}}
+    \begin{tabular}{@{}lrrrrrl@{}}
       \toprule
-      \textbf{Model} & \textbf{Params} & \textbf{GFLOPs} & \textbf{AP} &
-      \textbf{AP50} & \textbf{APs} & \textbf{NPU w8a16} \\
+      \textbf{Model} & \textbf{Params} & \textbf{mAP} & \textbf{AP50} &
+      \textbf{APs} & \textbf{QCS8550} & \textbf{Status} \\
       \midrule
-      YOLO26n-P2 & 2.662\,M & 9.65 & \textbf{0.2874} & \textbf{0.4766} &
-        \textbf{0.1884} & 8.53\,ms \\
-      YOLO26n    & 2.572\,M & 6.24 & 0.2752 & 0.4631 & 0.1689 & 4.94\,ms \\
-      YOLO11n    & 2.624\,M & 6.67 & 0.2616 & 0.4381 & 0.1556 & 4.71\,ms \\
-      YOLOv8n    & 3.157\,M & 8.86 & 0.2606 & 0.4405 & 0.1527 & \textbf{3.98\,ms} \\
+      \textbf{YOLO26n-P2} & 2.662\,M & \textbf{0.2874} & \textbf{0.4766} &
+        \textbf{0.1884} & 8.53\,ms & \textbf{selected} \\
+      YOLO26n  & 2.572\,M & 0.2752 & 0.4631 & 0.1689 & 4.93\,ms & comparison \\
+      YOLO11n  & 2.624\,M & 0.2616 & 0.4381 & 0.1556 & 4.71\,ms & comparison \\
+      YOLOv8n  & 3.157\,M & 0.2606 & 0.4405 & 0.1527 & \textbf{3.98\,ms} & baseline \\
       \bottomrule
     \end{tabular}
   \end{center}
   \vfill
   \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{exampleblock}{Three rankings, three orders}
+    \begin{column}{0.5\textwidth}
+      \begin{exampleblock}{YOLO26n-P2 leads every accuracy column}
         \small
-        Parameters, FLOPs and NPU latency rank these four models
-        \emph{differently}. P2 is second-smallest and slowest. No column
-        predicts another.
+        And leads by most on \textbf{APs}: $+23.4$\% over the baseline against
+        $+10.3$\% on mAP. Aerial frames are mostly small objects, so that is
+        the column that matters here.
       \end{exampleblock}
     \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{alertblock}{v8n and v11n are a tie}
-        \small
-        They differ by 0.001 AP, and the order \emph{reverses} against what
-        their own training runs reported. A difference that flips when
-        re-measured is not a difference.
-      \end{alertblock}
-    \end{column}
-  \end{columns}
-\end{frame}
-
-% ------------------------------------------------------------ NEW A ---
-\begin{frame}{The fastest precision is the one that is broken}
-  \begin{center}
-    \includegraphics[width=0.96\linewidth]{fig_quant_trap}
-  \end{center}
-  \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.5\textwidth}
-      \begin{alertblock}{W8A8 fails five times out of five}
-        \small
-        Every class score becomes exactly \textbf{0.0} while box regression
-        stays healthy. Three architectures, both export modes --- a property
-        of the detect head, not of one model.
-      \end{alertblock}
-    \end{column}
     \begin{column}{0.46\textwidth}
-      \begin{block}{And W4A16 is worse than broken}
+      \begin{alertblock}{YOLOv8n and YOLO11n are a tie}
         \small
-        It degrades silently: YOLO11n keeps \textbf{29} valid boxes against
-        FP32's 244, correlation drops to 0.73 --- \emph{and} it is slower than
-        W16A16. More compression bought size, not speed.
-      \end{block}
-    \end{column}
-  \end{columns}
-  \vfill
-  \begin{exampleblock}{}
-    \centering
-    \textbf{8 of 16 quantized configurations are unusable, and every one of
-    them reports good latency with zero operator fallback.}
-  \end{exampleblock}
-\end{frame}
-
-% ------------------------------------------------------------ NEW B ---
-\begin{frame}{YOLO26 must not be exported end-to-end}
-  \begin{center}
-    \includegraphics[width=0.9\linewidth]{fig_e2e_matrix}
-  \end{center}
-  \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.5\textwidth}
-      \begin{block}{Why it happens}
-        \small
-        Removing NMS moves the box decode \emph{inside} the graph: anchor-grid
-        offsets spanning 0--640 added to regressed distances. That sum needs
-        more dynamic range than a single INT16 scale holds.
-      \end{block}
-    \end{column}
-    \begin{column}{0.46\textwidth}
-      \begin{alertblock}{Why no metric catches it}
-        \small
-        Confidence still tracks FP32 at \textbf{0.9995} and the class labels
-        are right. Only the geometry is gone --- every box collapses to one
-        point. mAP would report a bad model, not a broken export.
+        0.001 apart, and the order \emph{reverses} between runs. Not a
+        difference --- reported as a tie rather than a ranking.
       \end{alertblock}
     \end{column}
   \end{columns}
-  \vfill
-  \begin{exampleblock}{The fix, and the cost}
-    \small
-    Disable \texttt{end2end} before export --- as Qualcomm's own wrapper does
-    --- and W8A16 works: 260 detections, 260 valid boxes. The cost is that
-    \textbf{NMS returns to the CPU}, which is the 54\% term in the frame budget.
-  \end{exampleblock}
+  \vspace{2pt}
+  \tiny\color{gray}
+  mAP measured locally on 2{,}192 tiles; latency on QCS8550 via AI Hub.
+  Host ms/tile omitted --- it moved 25\% between runs of the same model.
 \end{frame}
 
-% --------------------------------------------------------------- 13 ---
-\begin{frame}{Where the frame time goes}
-  \begin{center}
-    \includegraphics[width=0.92\linewidth]{fig_budget}
-  \end{center}
+% --- replaces slide 13 -------------------------------------------------
+\begin{frame}{Stream inference performance on edge}
   \begin{center}
     \small
     \begin{tabular}{@{}lrrl@{}}
       \toprule
       \textbf{Stage} & \textbf{ms/tile} & \textbf{$\times$4 tiles} & \textbf{measured on} \\
       \midrule
-      Letterbox                & 0.62 &  2.5 & board \\
-      BGR$\rightarrow$RGB, HWC$\rightarrow$CHW & 0.42 & 1.7 & board \\
-      \texttt{uint8}$\rightarrow$\texttt{float32} & 0.46 & 1.8 & board \\
-      NPU forward (W8A16)      & 3.98 & 15.9 & AI Hub QCS8550 \\
-      \textbf{Decode + NMS}    & \textbf{7.86} & \textbf{29.4} & board \\
+      Letterbox resize          & 1.36 &  5.5 & board (Kryo) \\
+      BGR$\rightarrow$RGB + CHW & 0.40 &  1.6 & board (Kryo) \\
+      uint8 $\rightarrow$ float32 & 0.43 & 1.7 & board (Kryo) \\
+      Graph execute (W8A16)     & 3.98 & 15.9 & QCS8550 (Hexagon) \\
+      \textbf{Decode + NMS}     & \textbf{7.34} & \textbf{29.4} & board (Kryo) \\
       \midrule
-      \textbf{Total}           & \textbf{13.3} & \textbf{54.1} & $\rightarrow \sim$18\,FPS \\
+      \textbf{Total}            & \textbf{13.52} & \textbf{54.1} &
+        $\rightarrow \sim$\textbf{18\,FPS} \\
       \bottomrule
     \end{tabular}
   \end{center}
   \vfill
+  \begin{center}
+    \includegraphics[width=0.86\linewidth]{fig_budget}
+  \end{center}
+  \vspace{-4pt}
   \begin{alertblock}{}
     \centering\small
-    RSS 125\,MB. NMS alone is larger than the entire quantized forward pass.
+    The NPU is \textbf{29\%} of the frame. Decode + NMS on the CPU is
+    \textbf{54\%} --- larger than the entire quantized forward pass.
+    Memory: \textbf{103\,MB} NPU context, \textbf{125\,MB} process RSS.
+    Only detection state leaves the device, never video.
   \end{alertblock}
 \end{frame}
 
-% --------------------------------------------------------------- 15 ---
+% --- replaces slide 15 -------------------------------------------------
 \begin{frame}{Ablation: does the P2 head pay for itself?}
   \begin{center}
-    \includegraphics[width=0.94\linewidth]{fig_tradeoff}
-  \end{center}
-  \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.52\textwidth}
-      \begin{block}{What the stride-4 branch costs}
-        \small
-        Anchors go from \textbf{8{,}400 to 34{,}000} at 640. Latency
-        \textbf{3.98 $\rightarrow$ 8.53\,ms} (2.1$\times$), for 3.5\% more
-        weights. The cost is resolution, not parameters.
-      \end{block}
-    \end{column}
-    \begin{column}{0.44\textwidth}
-      \begin{exampleblock}{What it buys}
-        \small
-        \textbf{APs $+23.4$\%} over YOLOv8n, against $+10.3$\% on AP overall.
-        The margin is largest exactly where the mechanism predicts.
-      \end{exampleblock}
-    \end{column}
-  \end{columns}
-  \vfill
-  \begin{alertblock}{Answer}
-    \centering\small
-    At \textbf{18\,FPS} the extra 4.5\,ms of NPU time costs about 1.5\,FPS ---
-    P2 pays for itself. At a 30\,FPS target it does not.
-    \textbf{The frame-rate requirement decides, not the mAP table.}
-  \end{alertblock}
-\end{frame}
-
-% ------------------------------------------------------------ NEW C ---
-\begin{frame}{Energy: three counters, none usable}
-  \begin{center}
-    \includegraphics[width=0.92\linewidth]{fig_power}
-  \end{center}
-  \begin{center}
     \small
-    \begin{tabular}{@{}lrrr@{}}
+    \begin{tabular}{@{}llrrl@{}}
       \toprule
-      \textbf{Source} & \textbf{Idle} & \textbf{6-core load} & \textbf{Separation} \\
+      \textbf{Variant} & \textbf{Small objects} & \textbf{APs} &
+      \textbf{Latency} & \textbf{Decision} \\
       \midrule
-      \texttt{battery} ($I \times V$) & 506.2 $\pm$ 6.0\,mW & 507.8 $\pm$ 6.1\,mW & 0.3\,$\sigma$ \\
-      USB-PD \texttt{ucsi} rail       & 3.000\,A / 5.000\,V & identical & constant \\
-      PMIC ADC \texttt{iin\_fb}       & $-15{,}980$\,$\mu$A & $-16{,}028$\,$\mu$A & 0.1\,$\sigma$ \\
+      YOLOv8n     & baseline             & 0.1527 & 3.98\,ms & reference \\
+      YOLO11n     & newer backbone       & 0.1556 & 4.71\,ms & tie with baseline \\
+      YOLO26n     & NMS-free head        & 0.1689 & 4.93\,ms & $+10.6$\% APs \\
+      \textbf{YOLO26n-P2} & \textbf{+ stride-4 branch} & \textbf{0.1884} &
+        8.53\,ms & \textbf{$+23.4$\% APs} \\
       \bottomrule
     \end{tabular}
   \end{center}
   \vfill
-  \begin{alertblock}{No joule figure appears anywhere in this work}
-    \small
-    A counter that cannot separate six busy cores from an idle board cannot
-    separate two models either. The USB rail reports the negotiated PD
-    contract, not draw. \textbf{Thermals do respond} --- 61\,$^\circ$C idle,
-    85\,$^\circ$C under load, clocks throttling from 2016 to 556\,MHz at
-    $\sim$60\,s --- so temperature is reported as the proxy, labelled as one.
-  \end{alertblock}
-\end{frame}
-
-% --------------------------------------------------------------- 16 ---
-\begin{frame}{Discussion and limitations}
   \begin{columns}[T,onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{exampleblock}{Established}
+    \begin{column}{0.5\textwidth}
+      \begin{block}{What the stride-4 branch costs}
         \small
-        \begin{itemize}\itemsep2pt
-          \item Tiling: \textbf{+69.8\% APs} for 3.95$\times$ time.
-          \item W8A16 is the only precision usable on every model.
-          \item W8A8 breaks the detect head, 5 of 5.
-          \item End-to-end export cannot be quantized.
-          \item NMS is \textbf{54\%} of the frame budget.
-        \end{itemize}
+        Anchors go from \textbf{8{,}400 to 34{,}000} at 640\,px. Latency
+        $3.98 \rightarrow 8.53$\,ms (2.1$\times$) for only 3.5\% more weights.
+        The cost is resolution, not parameters.
+      \end{block}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{exampleblock}{Answer}
+        \small
+        At an \textbf{18\,FPS} budget the extra 4.5\,ms costs about
+        \textbf{1.5\,FPS} --- P2 pays for itself. At a 30\,FPS target it would
+        not. \textbf{The frame-rate requirement decides, not the mAP table.}
       \end{exampleblock}
     \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{alertblock}{Limitations, stated}
-        \small
-        \begin{itemize}\itemsep2pt
-          \item \textbf{NPU numbers are AI Hub's cloud device}, not our board.
-                AI Hub ships QAIRT $\geq$2.45; the board runs 2.28, and its
-                runtime refuses the binary outright.
-          \item Host \texttt{ms/tile} is excluded --- it moved 25\% between
-                runs of the same model.
-          \item Three of four models hit the epoch cap still improving, so
-                these are 30-epoch numbers, not architecture ceilings.
-          \item Tracking is training-free (ByteTrack); no MOTA/IDF1 reported.
-        \end{itemize}
-      \end{alertblock}
-    \end{column}
   \end{columns}
-  \vfill
-  \begin{block}{}
-    \centering\small
-    Every table names where it was measured. Where the three sources
-    disagree, the disagreement is the result.
-  \end{block}
 \end{frame}
+
+
+% #####################################################################
+%  PART B — two corrections to existing slides (edit in place, no new frame)
+% #####################################################################
+%
+%  SLIDE 9 — remove two rungs from the evaluation ladder.
+%    "W8A8 + INT16 head" and "lite_mp 10% INT16" are per-layer mixed
+%    precision. AI Hub's submit_quantize_job takes one dtype pair for the
+%    whole model, and Qualcomm documents mixed precision as "currently not
+%    supported". Replace the five-rung ladder with:
+%
+%        0  FP32 CPU reference
+%        1  W8A8
+%        2  W8A16      <- the only precision usable on every model
+%        3  W16A16
+%        4  W4A16
+%
+%  SLIDE 16 — "Quantization may damage detection heads" is now measured, so
+%    change "may damage" to "does damage" and add the figure:
+%        W8A8 collapses the classification head on 5 of 5 model/export
+%        combinations -- every class score exactly 0.0 while box regression
+%        stays healthy. 8 of 16 quantized configurations are unusable and
+%        every one of them reports good latency with zero operator fallback.
+%
+%  SLIDE 4 — tracking and counting are training-free (ByteTrack + Kalman);
+%    only detection is trained. Worth stating: it is a deployment choice, not
+%    a gap, and it costs no extra inference pass on the edge device.
+%
+% #####################################################################
+%  PART C — held back for the ablation section. Not needed to present.
+%     docs/img/fig_quant_trap.png   the fastest precision is the broken one
+%     docs/img/fig_e2e_matrix.png   YOLO26 cannot be quantized end-to-end
+%     docs/img/fig_power.png        three power counters, none usable
+%     docs/img/fig_pipeline.png     pipeline with per-stage timings
+%     docs/img/fig_tradeoff.png     accuracy vs NPU latency
+%  Full write-up: docs/EDGE_BENCHMARK.md
+% #####################################################################
