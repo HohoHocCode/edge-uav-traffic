@@ -1,8 +1,23 @@
-# Quantization on the Hexagon NPU — measured on a real QCS8550
+# Quantization on the Hexagon NPU
 
-Every number here comes from a Qualcomm AI Hub job running on physical
-QCS8550 hardware, not a simulator or a proxy estimate. Job IDs are recorded
-so each row can be reopened.
+**Read the provenance line on every table before quoting it.** Numbers in this
+document come from three different places, and an earlier version of this file
+claimed all of them were "a real QCS8550, not a proxy estimate". That was
+wrong, and the correction is worth more than the sentence it replaces: the
+proxy and the board disagree by roughly 8×, which section 7 is about.
+
+| Where | What it is | Measures | Used for |
+|---|---|---|---|
+| **AI Hub `QCS8550 (Proxy)`** | Real silicon, Hexagon V73, `chipset:qualcomm-qcs8550-proxy`, Android 12, in Qualcomm's cloud device farm. Not a simulator — but **not our board** either: AI Hub serves the QCS8550 chipset through an equivalent-SoC device. | NPU latency, op residency, memory | §2 |
+| **Our QCS8550 board** | `172.18.50.11:5555`, `product:kalama`, Android 13, QNN v2.45. Physically on the desk. | end-to-end NPU latency, on-device correctness | §5, §7 |
+| **Host, ONNX Runtime CPU** | This laptop, running the QDQ ONNX that AI Hub's quantize job produced. Simulates quantized arithmetic; standard practice for accuracy, and *not* a device measurement. | AP / APs, head-output inspection | §3, §4, §6 |
+
+So: **the accuracy story is simulated on the host, the latency story is
+on-device, and only the w8a8 failure is confirmed in both places** — which is
+the one that matters most, and §7.1 is where it is confirmed on our own board.
+
+Job IDs are recorded so each AI Hub row can be reopened; the board rows carry
+the artefact and the harness that produced them.
 
 ---
 
@@ -32,7 +47,7 @@ distribution is byte-identical to what the deployed model sees
 
 ---
 
-## 2. Latency and residency
+## 2. Latency and residency — AI Hub proxy device
 
 | Precision | Inference | vs fp16 | Ops on NPU | Fallback | Peak memory |
 |---|---:|---:|---|---:|---:|
@@ -49,6 +64,8 @@ Then the accuracy check turns the table upside down.
 ---
 
 ## 3. w8a8 destroys the classification head
+
+*(Host, ONNX Runtime, on AI Hub's QDQ output. Reproduced on the board in §7.1.)*
 
 The w8a8 model produces **zero detections**. Not fewer — none, on every
 image tried.
@@ -111,6 +128,8 @@ which is which.
 
 ## 6. Quantization costs more in the rain — and only in the rain
 
+*(Host, ONNX Runtime, on AI Hub's w8a16 QDQ output — accuracy, not latency.)*
+
 Every published quantization table this project could find measures accuracy
 loss on clean imagery. A drone does not fly in clean imagery. Running the same
 ten-condition protocol on the w8a16 model and differencing against fp32 asks
@@ -160,7 +179,85 @@ multiple is not the claim, the ordering is.
 
 ---
 
-## 7. What still needs stating with each row
+## 7. The same binaries, run on our own board
+
+Everything above rests on a device we do not own. So the two compiled context
+binaries were pulled out of the AI Hub compile jobs and pushed to the board:
+
+```
+adb push fp16.bin w8a8.bin /data/local/tmp/sky/ctx/
+qnn-net-run --retrieve_context fp16.bin --backend libQnnHtp.so ...
+```
+
+Same artefact, same bytes, different silicon. Two things came out of it — one
+that confirms the headline finding and one that contradicts a number.
+
+### 7.1 The w8a8 collapse is real on our hardware
+
+Feeding one VisDrone frame through each binary on the board and reading the
+raw `(1, 14, 8400)` head output:
+
+| | box coordinates | class scores | scores > 0.25 |
+|---|---|---|---:|
+| fp32, host ONNX Runtime | 0.26 – 637.98 | 0 – 0.86561 | 137 |
+| **fp16, on the board** | 0.25 – 638.00 | 0 – 0.85889 | **135** |
+| **w8a8, on the board** | 0.00 – 637.39 | 0 – **0.00000** | **0** |
+
+The fp16 graph running on the board's Hexagon agrees with the host fp32 model
+to a class-score correlation of **0.9997**. The w8a8 graph emits exactly zero
+class scores on our board, exactly as it did on the proxy. So the central
+result of this document — *the fastest precision is the unusable one* — is not
+an artefact of Qualcomm's device farm. It reproduces on the hardware we ship on.
+
+### 7.2 The latency does *not* transfer, and the gap is not thermal
+
+| Precision | AI Hub proxy | Our board (median of 5) | Ratio |
+|---|---:|---:|---:|
+| fp16 | 5.087 ms | **39.84 ms** | 7.8× |
+| w8a8 | 1.993 ms | **21.18 ms** | 10.6× |
+
+Timing method: run the same binary with 5 and with 105 inferences and
+difference them, so process spawn, backend load, context deserialisation and
+graph finalisation all cancel (`4-bench/bench_ctx_device.sh`). The fixed cost
+that cancels is ~530 ms, against a ~40 ms inference — which is why a single
+`time qnn-net-run` is 93 % overhead and why this is differenced rather than
+timed directly.
+
+Four explanations were tested and eliminated:
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| Thermal throttling | NSP thermal zones during the run | 33.7 °C, cpu4 pinned at 2803/2803 MHz — **not throttled** |
+| Another workload | `top`, `loadavg` | 569 % of 600 % idle, load 0.67 — **idle** |
+| NPU clock policy | swept `--perf_profile` over `default`, `balanced`, `high_performance`, `sustained_high_performance`, `burst` | 38.7 / 39.1 / 39.4 / 38.9 / 38.1 ms — **flat**, so the NPU clock is not the limiter |
+| Host-side dtype conversion | re-ran with `--use_native_input_files` and inputs pre-cast to fp16 and uint8 | 40.3 and 21.1 ms — **no change**, so float→native conversion is not the cost |
+
+What survives: the difference is in the *harness*, not the chip. AI Hub's
+`estimated_inference_time` is the backend's own graph-execute figure.
+`qnn-net-run` is a file-driven reference application that marshals tensors
+across the CPU↔DSP boundary through the general RPC path on every iteration.
+The board:proxy ratio tracks input tensor size — fp16 carries 2.46 MB per
+inference against w8a8's 1.23 MB, and the on-board fp16:w8a8 ratio is 1.88
+against the proxy's 2.55, i.e. the board's costs are pulled toward the
+bytes-moved ratio of 2.0 rather than the compute ratio.
+
+This is stated as the surviving hypothesis, not a proven one: the backend
+profiler log (`--profiling_level basic`) would settle it, but it is a binary
+format and `qnn-profile-viewer` is not on this board, and guessing at its byte
+layout is exactly how the three earlier timing errors on this board happened.
+
+**The engineering consequence is the useful part.** Whichever mechanism it is,
+a deployed pipeline that hands frames to the NPU the way `qnn-net-run` does
+will see ~40 ms, not ~5 ms — the NPU speedup is invisible unless the
+application uses shared/ION buffers and keeps tensors resident. For the frame
+budget, **39.84 ms is the number to plan against**, and 5.087 ms is the ceiling
+that a zero-copy integration would be chasing.
+
+Raw rows: `docs/results/onboard_qcs8550.csv`.
+
+---
+
+## 8. What still needs stating with each row
 
 - `estimated_inference_time` from AI Hub is **compute only** — no camera
   capture, no letterbox, no NMS, no tracking. The frame-budget table is the

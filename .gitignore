@@ -36,3 +36,6 @@ desktop.ini
 models/_q*/
 models/*.zip
 results/calib/
+
+# AI Hub compiled context binaries (11 MB; re-download from the job IDs in docs/QUANTIZATION.md)
+models/_ctx/
