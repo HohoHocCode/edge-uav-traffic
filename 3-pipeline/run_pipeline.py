@@ -39,6 +39,7 @@ import viz  # noqa: E402
 from detector import Yolov8Detector  # noqa: E402
 from runtime import create_session  # noqa: E402
 from telemetry import TelemetryConfig, TelemetrySink  # noqa: E402
+from mjpeg import MjpegServer  # noqa: E402
 from tracker import ByteTrack, detections_as_tracks  # noqa: E402
 
 
@@ -47,8 +48,35 @@ def load_yaml(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def is_gst_pipeline(src) -> bool:
+    """A GStreamer launch string, as opposed to a path, URL or camera index.
+
+    Detected by the pipeline separator plus a known source element. A file
+    path will not contain ' ! ', so the test is safe.
+    """
+    return isinstance(src, str) and " ! " in src and any(
+        e in src for e in ("qtiqmmfsrc", "v4l2src", "filesrc", "rtspsrc",
+                           "videotestsrc", "nvarguscamerasrc")
+    )
+
+
+def open_capture(src):
+    """Open a capture from a camera index, a path/URL, or a GStreamer pipeline."""
+    if is_gst_pipeline(src):
+        cap = cv2.VideoCapture(src, cv2.CAP_GSTREAMER)
+        if not cap.isOpened():
+            info = cv2.getBuildInformation()
+            if "GStreamer:                   NO" in info:
+                print("[fatal] this OpenCV build has NO GStreamer support, so a "
+                      "GStreamer\n        pipeline can never open. The pip wheels "
+                      "are built without it.\n        Fix: apt install python3-opencv, "
+                      "or use a USB camera index.", file=sys.stderr)
+        return cap
+    return cv2.VideoCapture(src)
+
+
 def resolve_source(src: str):
-    """A bare integer means a camera index; anything else is a path or URL."""
+    """A bare integer means a camera index; anything else is a path, URL or pipeline."""
     try:
         return int(src)
     except (TypeError, ValueError):
@@ -74,6 +102,14 @@ def parse_args(argv=None):
                    help="apply a degradation condition to every frame "
                         "(see 2-augment/degradations.py CONDITION_IDS)")
     p.add_argument("--session-id", default=None)
+    p.add_argument("--mjpeg-port", type=int, default=0,
+                   help="serve annotated frames at http://<board-ip>:PORT/ . "
+                        "The only practical way to watch a headless board; "
+                        "0 disables it")
+    p.add_argument("--mjpeg-quality", type=int, default=75)
+    p.add_argument("--mjpeg-width", type=int, default=0,
+                   help="downscale the streamed frame only (0 = as rendered). "
+                        "Useful over a weak uplink; does not affect detection")
     return p.parse_args(argv)
 
 
@@ -134,9 +170,11 @@ def main(argv=None) -> int:
     # ---- capture ------------------------------------------------------
     source = resolve_source(args.source if args.source is not None
                             else cfg["capture"]["source"])
-    cap = cv2.VideoCapture(source)
+    cap = open_capture(source)
     if not cap.isOpened():
         print(f"[fatal] cannot open source {source!r}", file=sys.stderr)
+        print("        run 0-setup/probe_camera.py to find one that works",
+              file=sys.stderr)
         return 2
     src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
@@ -179,6 +217,18 @@ def main(argv=None) -> int:
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
         writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"),
                                  src_fps, (src_w, src_h))
+
+    # ---- live view ----------------------------------------------------
+    streamer = None
+    if args.mjpeg_port:
+        try:
+            streamer = MjpegServer(port=args.mjpeg_port,
+                                   quality=args.mjpeg_quality,
+                                   max_width=args.mjpeg_width).start()
+            print(f"[info] live view on http://<board-ip>:{args.mjpeg_port}/")
+        except OSError as exc:
+            print(f"[warn] could not start the MJPEG server on port "
+                  f"{args.mjpeg_port}: {exc}")
 
     # opencv-python-headless has no HighGUI at all, and a board over SSH has no
     # display. Probe once rather than crashing on the first frame.
@@ -238,7 +288,8 @@ def main(argv=None) -> int:
                                 "vehicles": report.vehicle_count})
                     last_level = report.congestion_level
 
-            if ocfg.get("enabled", True) and (writer is not None or show_window):
+            if ocfg.get("enabled", True) and (writer is not None or show_window
+                                              or streamer is not None):
                 viz.draw_regions(frame, ana.rois, ana.lines)
                 viz.draw_tracks(frame, tracks, class_names,
                                 show_id=ocfg.get("show_track_id", True))
@@ -246,6 +297,8 @@ def main(argv=None) -> int:
                              condition=args.degrade)
                 if writer is not None:
                     writer.write(frame)
+                if streamer is not None:
+                    streamer.publish(frame)
                 if show_window:
                     cv2.imshow("SkySentry", frame)
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
@@ -266,6 +319,9 @@ def main(argv=None) -> int:
             writer.release()
         if show_window:
             cv2.destroyAllWindows()
+        if streamer is not None:
+            print(f"[info] mjpeg: {streamer.summary()}")
+            streamer.stop()
         if sink is not None:
             # close() drains the uploader queue, so the summary is only
             # accurate afterwards; printing it first under-reports `posted`.
