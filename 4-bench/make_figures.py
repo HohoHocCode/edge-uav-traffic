@@ -301,6 +301,51 @@ def fig_power(root, out):
 
 
 # --------------------------------------------------------------------------- #
+def fig_budget(root, out):
+    """Where a frame's time actually goes once the board is included.
+
+    Stacked, because the argument is compositional: the NPU term is the small
+    one. Making the network faster moves the total very little while NMS sits
+    on the CPU -- and the head that would remove NMS is the head that cannot
+    be quantized.
+    """
+    import json
+    b = json.load(open(os.path.join(root, "results", "board",
+                                    "board_cpu_cold.json")))
+    npu, tiles = 3.984, 4          # v8n w8a16 on AI Hub's QCS8550
+    parts = [("NPU w8a16 (AI Hub)", npu, BLUE),
+             ("tiền xử lý (board)", b["pre_ms"], GREEN),
+             ("decode + NMS (board)", b["post_ms"], ORANGE)]
+
+    fig, ax = plt.subplots(figsize=(10.6, 4.4))
+    left = 0.0
+    for name, v, c in parts:
+        seg = v * tiles
+        ax.barh([0], [seg], left=left, color=c, height=.52, zorder=3)
+        ax.text(left + seg / 2, 0, f"{seg:.1f}", ha="center", va="center",
+                color="white", fontsize=14, fontweight="bold")
+        left += seg
+
+    ax.set_yticks([])
+    ax.set_ylim(-.75, .95)
+    ax.set_xlim(0, left * 1.06)
+    ax.set_xlabel("ms cho một khung hình (4 ô)")
+    ax.set_title(f"Frame budget: {left:.1f} ms  →  ~{1000 / left:.0f} FPS")
+    ax.grid(axis="y", visible=False)
+    ax.legend(handles=[Patch(facecolor=c, label=n) for n, _, c in parts],
+              loc="upper center", ncol=3, fontsize=11.5,
+              bbox_to_anchor=(.5, 1.03))
+    ax.text(0.5, -0.42,
+            "NPU đo trên thiết bị đám mây của AI Hub; hai khâu CPU đo trên chính "
+            "board.\nBinary AI Hub không nạp được trên board (QAIRT 2.28 vs 2.45), "
+            "nên cột NPU là cận dưới chưa kiểm chứng tại chỗ.",
+            transform=ax.transAxes, ha="center", fontsize=11, color=GREY)
+    p = os.path.join(out, "fig_budget.png")
+    fig.savefig(p); plt.close(fig)
+    return p
+
+
+# --------------------------------------------------------------------------- #
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(
@@ -310,7 +355,8 @@ def main() -> int:
     out = args.out or os.path.join(args.root, "docs", "img")
     os.makedirs(out, exist_ok=True)
 
-    for fn in (fig_quant_trap, fig_e2e_matrix, fig_models, fig_tiling, fig_power):
+    for fn in (fig_quant_trap, fig_e2e_matrix, fig_models, fig_tiling,
+               fig_power, fig_budget):
         try:
             p = fn(args.root, out)
             print(f"[ok] {os.path.relpath(p, args.root)}"
