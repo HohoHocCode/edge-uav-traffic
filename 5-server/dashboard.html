@@ -362,7 +362,12 @@
         </div>
         <div>
           <div class="font-display text-base font-bold tracking-widest" style="color: var(--amber)">SKYSENTRY</div>
-          <div class="text-[9px] text-[var(--muted)] tracking-wider">EDGE AI MONITOR · QCS8550 NPU</div>
+          <!-- Says what actually ran, not what we hoped would run. The board
+               ships QAIRT 2.28 and cannot load a 2.45 context binary, so
+               inference falls back to the Kryo CPU. Claiming NPU here while
+               the infer stage reports ~110 ms would be a hardware claim the
+               numbers on the same screen contradict. -->
+          <div class="text-[9px] text-[var(--muted)] tracking-wider" id="backend-label">EDGE AI MONITOR · QCS8550 KRYO CPU</div>
         </div>
       </div>
     </div>
