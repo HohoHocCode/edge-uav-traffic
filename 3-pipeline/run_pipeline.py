@@ -210,25 +210,35 @@ def main(argv=None) -> int:
             },
         )
 
-    # ---- writer -------------------------------------------------------
+    # ---- writer & frame streamer -------------------------------------
     writer = None
     save_path = args.save_video or cfg["overlay"].get("save_video")
     if save_path:
         os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-        writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"),
-                                 src_fps, (src_w, src_h))
+        writer = cv2.VideoWriter(
+            save_path, cv2.VideoWriter_fourcc(*"mp4v"), src_fps, (src_w, src_h)
+        )
+
+    # TẠO THƯ MỤC FRAMES ĐỂ LƯU ẢNH REALTIME CHO DASHBOARD
+    frames_dir = os.path.join(ROOT, "results", "frames")
+    os.makedirs(frames_dir, exist_ok=True)
+    latest_frame_path = os.path.join(frames_dir, "latest_frame.jpg")
 
     # ---- live view ----------------------------------------------------
     streamer = None
     if args.mjpeg_port:
         try:
-            streamer = MjpegServer(port=args.mjpeg_port,
-                                   quality=args.mjpeg_quality,
-                                   max_width=args.mjpeg_width).start()
+            streamer = MjpegServer(
+                port=args.mjpeg_port,
+                quality=args.mjpeg_quality,
+                max_width=args.mjpeg_width,
+            ).start()
             print(f"[info] live view on http://<board-ip>:{args.mjpeg_port}/")
         except OSError as exc:
-            print(f"[warn] could not start the MJPEG server on port "
-                  f"{args.mjpeg_port}: {exc}")
+            print(
+                f"[warn] could not start the MJPEG server on port "
+                f"{args.mjpeg_port}: {exc}"
+            )
 
     # opencv-python-headless has no HighGUI at all, and a board over SSH has no
     # display. Probe once rather than crashing on the first frame.
@@ -237,8 +247,10 @@ def main(argv=None) -> int:
         try:
             cv2.namedWindow("SkySentry", cv2.WINDOW_NORMAL)
         except cv2.error:
-            print("[warn] no GUI available (headless OpenCV or no display); "
-                  "continuing without a window")
+            print(
+                "[warn] no GUI available (headless OpenCV or no display); "
+                "continuing without a window"
+            )
             show_window = False
     ocfg = cfg["overlay"]
     frame_id = 0
@@ -253,8 +265,7 @@ def main(argv=None) -> int:
             if not ok:
                 break
             if resize_to:
-                frame = cv2.resize(frame, (src_w, src_h),
-                                   interpolation=cv2.INTER_AREA)
+                frame = cv2.resize(frame, (src_w, src_h), interpolation=cv2.INTER_AREA)
             if degrade_fn is not None:
                 frame = degrade_fn(frame, frame_id)
 
@@ -264,9 +275,6 @@ def main(argv=None) -> int:
             if tracker is not None:
                 tracks = tracker.update(dets.xyxy, dets.conf, dets.cls)
             else:
-                # Detection-only mode. Wrapping the detections keeps every
-                # count meaningful; returning [] would make the run look like
-                # an empty scene instead of an untracked one.
                 tracks = detections_as_tracks(dets.xyxy, dets.conf, dets.cls)
             track_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -274,8 +282,10 @@ def main(argv=None) -> int:
             report = ana.update(tracks, frame.shape[:2], frame_id, ts_ms)
 
             timings = {
-                "pre_ms": dets.pre_ms, "infer_ms": dets.infer_ms,
-                "post_ms": dets.post_ms, "track_ms": track_ms,
+                "pre_ms": dets.pre_ms,
+                "infer_ms": dets.infer_ms,
+                "post_ms": dets.post_ms,
+                "track_ms": track_ms,
                 "total_ms": dets.total_ms + track_ms,
             }
             totals.append(timings["total_ms"])
@@ -283,20 +293,44 @@ def main(argv=None) -> int:
             if sink is not None:
                 sink.write(report, timings)
                 if report.congestion_level != last_level:
-                    sink.event(frame_id, "congestion_change", report.congestion_level,
-                               {"from": last_level, "to": report.congestion_level,
-                                "vehicles": report.vehicle_count})
+                    sink.event(
+                        frame_id,
+                        "congestion_change",
+                        report.congestion_level,
+                        {
+                            "from": last_level,
+                            "to": report.congestion_level,
+                            "vehicles": report.vehicle_count,
+                        },
+                    )
                     last_level = report.congestion_level
 
-            if ocfg.get("enabled", True) and (writer is not None or show_window
-                                              or streamer is not None):
+            if ocfg.get("enabled", True) and (
+                writer is not None or show_window or streamer is not None
+            ):
                 viz.draw_regions(frame, ana.rois, ana.lines)
-                viz.draw_tracks(frame, tracks, class_names,
-                                show_id=ocfg.get("show_track_id", True))
-                viz.draw_hud(frame, report, timings, session.backend_name,
-                             condition=args.degrade)
+                viz.draw_tracks(
+                    frame, tracks, class_names, show_id=ocfg.get("show_track_id", True)
+                )
+                viz.draw_hud(
+                    frame, report, timings, session.backend_name, condition=args.degrade
+                )
+
                 if writer is not None:
                     writer.write(frame)
+
+                # GHI ẢNH RA FILE ĐỂ DASHBOARD LẤY REALTIME
+                # 1. Ghi vào file tạm (tmp) để tránh bị đọc phải file đang ghi dở
+                temp_frame_path = latest_frame_path.replace(".jpg", "_tmp.jpg")
+                write_ok = cv2.imwrite(temp_frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+                # 2. Nếu ghi xong hoàn toàn (file tạm đã đóng), mới đổi tên thành file chính
+                if write_ok:
+                    try:
+                        os.replace(temp_frame_path, latest_frame_path)  # os.replace là thao tác nguyên tử
+                    except Exception:
+                        pass
+
                 if streamer is not None:
                     streamer.publish(frame)
                 if show_window:
@@ -323,16 +357,16 @@ def main(argv=None) -> int:
             print(f"[info] mjpeg: {streamer.summary()}")
             streamer.stop()
         if sink is not None:
-            # close() drains the uploader queue, so the summary is only
-            # accurate afterwards; printing it first under-reports `posted`.
             sink.close()
             print(f"[info] telemetry: {sink.summary()}")
 
     if totals:
         a = np.asarray(totals)
-        print(f"[done] {frame_id} frames | total_ms avg {a.mean():.2f} "
-              f"p50 {np.percentile(a, 50):.2f} p95 {np.percentile(a, 95):.2f} "
-              f"| {1000.0 / a.mean():.1f} FPS avg")
+        print(
+            f"[done] {frame_id} frames | total_ms avg {a.mean():.2f} "
+            f"p50 {np.percentile(a, 50):.2f} p95 {np.percentile(a, 95):.2f} "
+            f"| {1000.0 / a.mean():.1f} FPS avg"
+        )
         print(f"[done] crossings: {ana.total_crossings}")
     return 0
 

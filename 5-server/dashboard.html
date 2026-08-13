@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkySentry GCS — Realtime Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090f;
+      --surface: #0f141d;
+      --surface-2: #161d2a;
+      --border: #232c3d;
+      --border-bright: #3a465e;
+      --amber: #ffb627;
+      --cyan: #00d9ff;
+      --green: #00ff9d;
+      --red: #ff3366;
+      --orange: #ff6b35;
+      --yellow: #facc15;
+      --text: #e8eef5;
+      --muted: #8a9bb0;
+      --grid: rgba(0, 217, 255, 0.05);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      height: 100vh;
+      background-image: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0, 217, 255, 0.04) 0%, transparent 60%), linear-gradient(180deg, var(--bg) 0%, #04060b 100%);
+    }
+
+    .font-display {
+      font-family: 'Orbitron', sans-serif;
+      letter-spacing: 0.02em;
+    }
+
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(22, 29, 42, 0.55) 0%, rgba(15, 20, 29, 0.85) 100%);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(6px);
+      position: relative;
+    }
+
+    .panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border-bright) 30%, var(--border-bright) 70%, transparent);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 11px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.25);
+    }
+
+    .panel-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--amber);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    .status-dot.live {
+      background: var(--green);
+      color: var(--green);
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-dot.dead {
+      background: var(--red);
+      color: var(--red);
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.4;
+        transform: scale(0.8);
+      }
+    }
+
+    .kpi-card {
+      background: linear-gradient(135deg, rgba(22, 29, 42, 0.7) 0%, rgba(7, 9, 15, 0.85) 100%);
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 2px;
+      height: 100%;
+      background: var(--amber);
+    }
+
+    .kpi-card.cyan::before {
+      background: var(--cyan);
+    }
+
+    .kpi-card.green::before {
+      background: var(--green);
+    }
+
+    .kpi-card.orange::before {
+      background: var(--orange);
+    }
+
+    .kpi-card.red::before {
+      background: var(--red);
+    }
+
+    .kpi-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      font-weight: 500;
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    .kpi-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+      margin-top: 3px;
+    }
+
+    .kpi-unit {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: 3px;
+      font-family: 'JetBrains Mono';
+    }
+
+    .cong-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border: 1px solid currentColor;
+    }
+
+    .cong-normal {
+      color: var(--green);
+      background: rgba(0, 255, 157, 0.08);
+    }
+
+    .cong-light {
+      color: var(--cyan);
+      background: rgba(0, 217, 255, 0.08);
+    }
+
+    .cong-moderate {
+      color: var(--yellow);
+      background: rgba(250, 204, 21, 0.08);
+    }
+
+    .cong-heavy {
+      color: var(--orange);
+      background: rgba(255, 107, 53, 0.1);
+    }
+
+    .cong-severe {
+      color: var(--red);
+      background: rgba(255, 51, 102, 0.1);
+      animation: pulse 1s infinite;
+    }
+
+    .pipe-stack {
+      display: flex;
+      height: 26px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.4);
+    }
+
+    .pipe-seg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      color: #07090f;
+      transition: width 0.4s ease;
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-bright);
+      border-radius: 3px;
+    }
+
+    /* Video Frame CSS */
+    .video-container {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .video-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .hud-overlay {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .hud-box {
+      background: rgba(7, 9, 15, 0.7);
+      border: 1px solid var(--amber);
+      padding: 4px 8px;
+      font-family: 'JetBrains Mono';
+      font-size: 10px;
+      color: var(--amber);
+    }
+
+    .scan-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan);
+      animation: scan 3s linear infinite;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    @keyframes scan {
+      0% {
+        top: 0;
+        opacity: 0;
+      }
+
+      10% {
+        opacity: 0.8;
+      }
+
+      90% {
+        opacity: 0.8;
+      }
+
+      100% {
+        top: 100%;
+        opacity: 0;
+      }
+    }
+
+    .no-signal {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      color: var(--red);
+      font-family: 'Orbitron';
+      z-index: 2;
+    }
+
+    .no-signal.hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <header
+    class="border-b border-[var(--border)] bg-[var(--surface)]/80 backdrop-blur-md px-4 py-2 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 border border-amber-500/60 flex items-center justify-center"
+          style="background: rgba(255,182,39,0.05)">
+          <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5"
+            style="color: var(--amber)">
+            <path d="M12 2 L22 8 L22 16 L12 22 L2 16 L2 8 Z" />
+            <path d="M12 6 L18 9.5 L18 14.5 L12 18 L6 14.5 L6 9.5 Z" />
+            <circle cx="12" cy="12" r="2" fill="currentColor" />
+          </svg>
+        </div>
+        <div>
+          <div class="font-display text-base font-bold tracking-widest" style="color: var(--amber)">SKYSENTRY</div>
+          <div class="text-[9px] text-[var(--muted)] tracking-wider">EDGE AI MONITOR · QCS8550 NPU</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 px-3 py-1 border border-[var(--green)]/40"
+        style="background: rgba(0,255,157,0.06)">
+        <span class="status-dot live" id="status-dot"></span>
+        <span class="font-display text-[10px] tracking-wider text-[var(--green)]" id="status-banner">STREAMING</span>
+      </div>
+      <div class="font-mono text-[10px] text-[var(--muted)]" id="utc-time">--:--:--</div>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-9 gap-1.5 px-2 py-1.5 border-b border-[var(--border)]">
+    <div class="kpi-card">
+      <div class="kpi-label">Frame ID</div>
+      <div class="kpi-value font-mono" id="kpi-frame">0</div>
+    </div>
+    <div class="kpi-card cyan">
+      <div class="kpi-label">Timestamp</div>
+      <div class="kpi-value font-mono" id="kpi-ts">0.00<span class="kpi-unit">ms</span></div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">n_tracks</div>
+      <div class="kpi-value" id="kpi-tracks">0</div>
+    </div>
+    <div class="kpi-card orange">
+      <div class="kpi-label">Vehicles</div>
+      <div class="kpi-value" id="kpi-veh">0</div>
+    </div>
+    <div class="kpi-card cyan">
+      <div class="kpi-label">Persons</div>
+      <div class="kpi-value" id="kpi-ppl">0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Congestion</div>
+      <div class="mt-1.5"><span class="cong-pill cong-normal" id="kpi-cong">--</span></div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Total Latency</div>
+      <div class="kpi-value" id="kpi-total">0.00<span class="kpi-unit">ms</span></div>
+    </div>
+    <div class="kpi-card green">
+      <div class="kpi-label">FPS (measured)</div>
+      <div class="kpi-value" id="kpi-fps">0.0</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Session ID</div>
+      <div class="kpi-value text-[11px] truncate mt-2" id="kpi-session">--</div>
+    </div>
+  </div>
+
+  <main class="grid grid-cols-12 gap-1.5 p-1.5" style="height: calc(100vh - 49px - 70px)">
+    <!-- LEFT -->
+    <aside class="col-span-3 flex flex-col gap-1.5 overflow-hidden">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Pipeline Timing</span><span
+            class="text-[9px] font-mono text-[var(--muted)]">5-stage</span></div>
+        <div class="p-3 flex flex-col gap-2.5">
+          <div class="pipe-stack">
+            <div class="pipe-seg" style="background: #00d9ff; width: 10%" id="seg-pre"><span>pre</span></div>
+            <div class="pipe-seg" style="background: #ffb627; width: 70%" id="seg-infer"><span>infer</span></div>
+            <div class="pipe-seg" style="background: #00ff9d; width: 6%" id="seg-post"><span>post</span></div>
+            <div class="pipe-seg" style="background: #ff6b35; width: 8%" id="seg-track"><span>track</span></div>
+          </div>
+          <div class="grid grid-cols-5 gap-1 text-center font-mono text-[9px]">
+            <div>
+              <div class="text-[var(--muted)]">pre</div>
+              <div class="text-[var(--cyan)]" id="v-pre">0.0</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted)]">infer</div>
+              <div class="text-[var(--amber)]" id="v-infer">0.0</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted)]">post</div>
+              <div class="text-[var(--green)]" id="v-post">0.0</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted)]">track</div>
+              <div class="text-[var(--orange)]" id="v-track">0.0</div>
+            </div>
+            <div>
+              <div class="text-[var(--muted)]">total</div>
+              <div class="text-[var(--text)] font-bold" id="v-total">0.0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel flex-1 flex flex-col min-h-0">
+        <div class="panel-header"><span class="panel-title">Class Distribution</span><span
+            class="text-[9px] font-mono text-[var(--muted)]">cumulative</span></div>
+        <div class="flex-1 p-2 min-h-0"><canvas id="chart-class"></canvas></div>
+      </div>
+    </aside>
+
+    <!-- CENTER -->
+    <section class="col-span-6 flex flex-col gap-1.5 overflow-hidden">
+      <!-- Video Feed -->
+      <div class="panel flex flex-col" style="height: 60%">
+        <div class="panel-header">
+          <span class="panel-title">Live Annotated Feed</span>
+          <span class="text-[9px] font-mono text-[var(--cyan)]" id="frame-tag">fetching frames...</span>
+        </div>
+        <div class="video-container flex-1">
+          <img id="video-feed" src="" alt="Live Feed" style="display: none;">
+          <div class="no-signal" id="no-signal">
+            <svg viewBox="0 0 24 24" class="w-12 h-12 mb-2" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 2 L22 8 L22 16 L12 22 L2 16 L2 8 Z" />
+              <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" />
+            </svg>
+            <div class="text-lg">NO SIGNAL</div>
+            <div class="text-[10px] text-[var(--muted)] mt-1 font-mono">Waiting for latest_frame.jpg</div>
+          </div>
+          <div class="hud-overlay">
+            <div class="hud-box">SKYSENTRY CAM-01</div>
+            <div class="hud-box">LIVE ●</div>
+          </div>
+          <div class="scan-line"></div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="grid grid-cols-2 gap-1.5" style="height: 40%">
+        <div class="panel flex flex-col">
+          <div class="panel-header">
+            <span class="panel-title">Tracks Timeline</span>
+            <div class="flex gap-3 text-[9px] font-mono">
+              <span><span class="inline-block w-2 h-2 bg-[var(--amber)] mr-1"></span>tracks</span>
+              <span><span class="inline-block w-2 h-2 bg-[var(--orange)] mr-1"></span>vehicles</span>
+            </div>
+          </div>
+          <div class="flex-1 p-2 min-h-0"><canvas id="chart-tracks"></canvas></div>
+        </div>
+        <div class="panel flex flex-col">
+          <div class="panel-header"><span class="panel-title">Latency Breakdown</span></div>
+          <div class="flex-1 p-2 min-h-0"><canvas id="chart-latency"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT -->
+    <aside class="col-span-3 flex flex-col gap-1.5 overflow-hidden">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">ROI & Line Flow</span><span
+            class="text-[9px] font-mono text-[var(--muted)]">cumulative</span></div>
+        <div class="p-3 flex flex-col gap-2.5 font-mono text-[10px]">
+          <div>
+            <div class="text-[var(--muted)] text-[9px] mb-1.5 tracking-wider">ROI DENSITY (CURRENT)</div>
+            <div class="flex flex-col gap-1.5">
+              <div class="flex items-center gap-2">
+                <span class="text-[var(--cyan)] w-20">intersection</span>
+                <div class="flex-1 h-3 bg-black/40 border border-[var(--border)] relative">
+                  <div class="absolute inset-y-0 left-0 bg-[var(--cyan)]" style="width: 0%" id="roi-int-bar"></div>
+                </div>
+                <span class="text-[var(--cyan)] w-8 text-right" id="roi-int-val">0</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[var(--amber)] w-20">full_frame</span>
+                <div class="flex-1 h-3 bg-black/40 border border-[var(--border)] relative">
+                  <div class="absolute inset-y-0 left-0 bg-[var(--amber)]" style="width: 0%" id="roi-full-bar"></div>
+                </div>
+                <span class="text-[var(--amber)] w-8 text-right" id="roi-full-val">0</span>
+              </div>
+            </div>
+          </div>
+          <div class="border-t border-[var(--border)] pt-2">
+            <div class="text-[var(--muted)] text-[9px] mb-1.5 tracking-wider">LINE_MAIN_ROAD (CUMULATIVE)</div>
+            <div class="flex items-center gap-3 mt-1">
+              <span class="text-[9px] text-[var(--green)] w-12">FWD →</span>
+              <div class="flex-1 bg-black/40 h-2 relative">
+                <div class="h-full bg-[var(--green)]" style="width: 0%" id="line-fwd-bar"></div>
+              </div>
+              <span class="font-bold w-6 text-right" id="line-fwd-val">0</span>
+            </div>
+            <div class="flex items-center gap-3 mt-1">
+              <span class="text-[9px] text-[var(--orange)] w-12">← BWD</span>
+              <div class="flex-1 bg-black/40 h-2 relative">
+                <div class="h-full bg-[var(--orange)]" style="width: 0%" id="line-bwd-bar"></div>
+              </div>
+              <span class="font-bold w-6 text-right" id="line-bwd-val">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel flex-1 flex flex-col min-h-0">
+        <div class="panel-header"><span class="panel-title">CSV Stream · tail</span><span
+            class="text-[9px] font-mono text-[var(--amber)]">live</span></div>
+        <div class="flex-1 overflow-y-auto font-mono text-[9px] p-2 leading-tight" id="csv-tail">
+          <div class="text-[var(--muted)]">Waiting for data...</div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const CLASSES = [
+      { name: 'pedestrian', color: '#00d9ff' }, { name: 'people', color: '#7cffcb' },
+      { name: 'bicycle', color: '#ffb627' }, { name: 'car', color: '#00ff9d' },
+      { name: 'van', color: '#ff9d00' }, { name: 'truck', color: '#ff6b35' },
+      { name: 'tricycle', color: '#ff3366' }, { name: 'awning-tricycle', color: '#c084fc' },
+      { name: 'bus', color: '#facc15' }, { name: 'motor', color: '#22d3ee' }
+    ];
+
+    Chart.defaults.color = '#8a9bb0';
+    Chart.defaults.font.family = 'JetBrains Mono';
+    Chart.defaults.font.size = 9;
+
+    const tracksCtx = document.getElementById('chart-tracks').getContext('2d');
+    const tracksChart = new Chart(tracksCtx, {
+      type: 'line',
+      data: {
+        labels: [], datasets: [
+          { label: 'n_tracks', data: [], borderColor: '#ffb627', backgroundColor: 'rgba(255,182,39,0.15)', borderWidth: 1.5, fill: true, tension: 0.35, pointRadius: 0 },
+          { label: 'vehicles', data: [], borderColor: '#ff6b35', backgroundColor: 'rgba(255,107,53,0.1)', borderWidth: 1.5, fill: false, tension: 0.35, pointRadius: 0 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
+        scales: { x: { grid: { color: 'rgba(35,44,61,0.4)' }, ticks: { maxTicksLimit: 6, font: { size: 8 } } }, y: { beginAtZero: true, grid: { color: 'rgba(35,44,61,0.4)' }, ticks: { font: { size: 8 } } } }
+      }
+    });
+
+    const latCtx = document.getElementById('chart-latency').getContext('2d');
+    const latChart = new Chart(latCtx, {
+      type: 'bar',
+      data: {
+        labels: [], datasets: [
+          { label: 'pre', data: [], backgroundColor: '#00d9ff', stack: 'a' },
+          { label: 'infer', data: [], backgroundColor: '#ffb627', stack: 'a' },
+          { label: 'post', data: [], backgroundColor: '#00ff9d', stack: 'a' },
+          { label: 'track', data: [], backgroundColor: '#ff6b35', stack: 'a' }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } },
+        scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 6, font: { size: 8 } } }, y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(35,44,61,0.4)' }, ticks: { font: { size: 8 } } } }
+      }
+    });
+
+    const classCtx = document.getElementById('chart-class').getContext('2d');
+    const classChart = new Chart(classCtx, {
+      type: 'doughnut',
+      data: { labels: CLASSES.map(c => c.name), datasets: [{ data: CLASSES.map(() => 0), backgroundColor: CLASSES.map(c => c.color), borderColor: '#07090f', borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '58%', plugins: { legend: { position: 'right', labels: { font: { size: 9, family: 'JetBrains Mono' }, boxWidth: 8, padding: 4 } } } }
+    });
+
+    // --- Video Feed Updater ---
+    const videoFeed = document.getElementById('video-feed');
+    const noSignal = document.getElementById('no-signal');
+
+    function updateVideoFeed() {
+      const img = new Image();
+      img.onload = () => {
+        videoFeed.src = img.src;
+        videoFeed.style.display = 'block';
+        noSignal.classList.add('hidden');
+      };
+      img.onerror = () => {
+        videoFeed.style.display = 'none';
+        noSignal.classList.remove('hidden');
+      };
+      // Thêm tham số ngẫu nhiên để tránh cache
+      img.src = '/api/video_feed?t=' + new Date().getTime();
+    }
+    // Cập nhật ảnh mỗi 250ms (4 FPS)
+    setInterval(updateVideoFeed, 250);
+    updateVideoFeed();
+
+    let abortController = null;
+
+    async function fetchData() {
+      if (abortController) abortController.abort();
+      abortController = new AbortController();
+
+      try {
+        const res = await fetch('/api/telemetry', { signal: abortController.signal });
+        const data = await res.json();
+
+        if (data.length === 0) {
+          document.getElementById('status-banner').textContent = 'NO DATA';
+          document.getElementById('status-dot').className = 'status-dot dead';
+          return;
+        }
+
+        document.getElementById('status-banner').textContent = 'STREAMING';
+        document.getElementById('status-dot').className = 'status-dot live';
+        document.getElementById('utc-time').textContent = new Date().toUTCString().slice(17, 25) + ' UTC';
+
+        const f = data[data.length - 1];
+
+        document.getElementById('kpi-frame').textContent = f.frame_id;
+        document.getElementById('frame-tag').textContent = `frame #${f.frame_id}`;
+        document.getElementById('kpi-ts').innerHTML = `${f.timestamp_ms.toFixed(2)}<span class="kpi-unit">ms</span>`;
+        document.getElementById('kpi-tracks').textContent = f.n_tracks;
+        document.getElementById('kpi-veh').textContent = f.vehicle_count;
+        document.getElementById('kpi-ppl').textContent = f.person_count;
+        document.getElementById('kpi-total').innerHTML = `${f.total.toFixed(2)}<span class="kpi-unit">ms</span>`;
+        document.getElementById('kpi-session').textContent = f.session_id || '--';
+
+        const congEl = document.getElementById('kpi-cong');
+        congEl.textContent = f.congestion_level.toUpperCase();
+        congEl.className = 'cong-pill cong-' + f.congestion_level;
+
+        if (data.length >= 2) {
+          const prev = data[data.length - 2];
+          const dt = f.timestamp_ms - prev.timestamp_ms;
+          const fps = dt > 0 ? (1000 / dt) : 0;
+          document.getElementById('kpi-fps').textContent = fps.toFixed(1);
+        }
+
+        const total = f.total;
+        document.getElementById('seg-pre').style.width = (f.pre / total * 100) + '%';
+        document.getElementById('seg-infer').style.width = (f.infer / total * 100) + '%';
+        document.getElementById('seg-post').style.width = (f.post / total * 100) + '%';
+        document.getElementById('seg-track').style.width = (f.track / total * 100) + '%';
+        document.getElementById('v-pre').textContent = f.pre.toFixed(2);
+        document.getElementById('v-infer').textContent = f.infer.toFixed(2);
+        document.getElementById('v-post').textContent = f.post.toFixed(2);
+        document.getElementById('v-track').textContent = f.track.toFixed(2);
+        document.getElementById('v-total').textContent = f.total.toFixed(2);
+
+        document.getElementById('roi-int-val').textContent = f.roi_intersection;
+        document.getElementById('roi-full-val').textContent = f.roi_full_frame;
+        document.getElementById('roi-int-bar').style.width = Math.min(100, f.roi_intersection * 5) + '%';
+        document.getElementById('roi-full-bar').style.width = Math.min(100, f.roi_full_frame * 5) + '%';
+
+        document.getElementById('line-fwd-val').textContent = f.line_fwd;
+        document.getElementById('line-bwd-val').textContent = f.line_bwd;
+        const maxLine = Math.max(f.line_fwd, f.line_bwd, 1);
+        document.getElementById('line-fwd-bar').style.width = (f.line_fwd / maxLine * 100) + '%';
+        document.getElementById('line-bwd-bar').style.width = (f.line_bwd / maxLine * 100) + '%';
+
+        const chartData = data.slice(-30);
+        tracksChart.data.labels = chartData.map(d => d.frame_id);
+        tracksChart.data.datasets[0].data = chartData.map(d => d.n_tracks);
+        tracksChart.data.datasets[1].data = chartData.map(d => d.vehicle_count);
+        tracksChart.update('none');
+
+        latChart.data.labels = chartData.map(d => d.frame_id);
+        latChart.data.datasets[0].data = chartData.map(d => d.pre);
+        latChart.data.datasets[1].data = chartData.map(d => d.infer);
+        latChart.data.datasets[2].data = chartData.map(d => d.post);
+        latChart.data.datasets[3].data = chartData.map(d => d.track);
+        latChart.update('none');
+
+        const cumCls = {};
+        CLASSES.forEach(c => cumCls[c.name] = 0);
+        data.forEach(d => { Object.keys(d.cls).forEach(k => cumCls[k] += d.cls[k]); });
+        classChart.data.datasets[0].data = CLASSES.map(c => cumCls[c.name]);
+        classChart.update('none');
+
+        const tailHtml = data.slice(-8).reverse().map(d => {
+          return `<div style="color: var(--text)">${d.frame_id}, ${d.timestamp_ms.toFixed(0)}, ${d.n_tracks}, ${d.vehicle_count}, ${d.person_count}, ${d.congestion_level}, ..., ${d.total.toFixed(1)}ms</div>`;
+        }).join('');
+        document.getElementById('csv-tail').innerHTML = tailHtml;
+
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error('Fetch error:', e);
+          document.getElementById('status-banner').textContent = 'BACKEND OFFLINE';
+          document.getElementById('status-dot').className = 'status-dot dead';
+        }
+      }
+    }
+
+    // Poll CSV mỗi 1 giây
+    setInterval(fetchData, 1000);
+    fetchData();
+  </script>
+</body>
+
+</html>
