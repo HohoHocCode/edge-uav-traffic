@@ -44,6 +44,40 @@ def sha256(path: str, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def sanitise_onnx(path: str) -> list[str]:
+    """Remove graph IO tensors that are also declared in ``value_info``.
+
+    Ultralytics' export followed by onnxslim can leave the output tensor
+    listed twice: once in ``graph.output`` and again in ``graph.value_info``.
+    The ONNX spec says value_info carries *intermediate* tensors only, so this
+    is malformed. ONNX Runtime tolerates it silently, which is why it survives
+    local testing -- but the Qualcomm AI Hub converter rejects the model
+    outright:
+
+        Tensors {'output0'} occur in value_info but also in model IO.
+
+    Stripping the duplicates changes no semantics: the shapes are already
+    declared authoritatively in graph.input / graph.output.
+    """
+    try:
+        import onnx
+    except ImportError:
+        return []
+
+    model = onnx.load(path)
+    io_names = {t.name for t in model.graph.input} | \
+               {t.name for t in model.graph.output}
+    dupes = [vi.name for vi in model.graph.value_info if vi.name in io_names]
+    if not dupes:
+        return []
+
+    keep = [vi for vi in model.graph.value_info if vi.name not in io_names]
+    del model.graph.value_info[:]
+    model.graph.value_info.extend(keep)
+    onnx.save(model, path)
+    return dupes
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--weights", required=True, help="path to best.pt")
@@ -86,6 +120,13 @@ def main() -> int:
             os.replace(exported, out)
     else:
         out = exported
+
+    dupes = sanitise_onnx(out)
+    if dupes:
+        print(f"[fix] removed {len(dupes)} duplicate value_info entr"
+              f"{'y' if len(dupes) == 1 else 'ies'}: {dupes}")
+        print("      (ONNX Runtime ignores these; the AI Hub converter "
+              "rejects the model because of them)")
 
     meta = {
         "source_weights": os.path.abspath(args.weights),

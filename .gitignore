@@ -31,3 +31,8 @@ yolo*.pt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# AI Hub artefacts and calibration tensors (regenerate; calibration.npy is 1.2 GB)
+models/_q*/
+models/*.zip
+results/calib/
