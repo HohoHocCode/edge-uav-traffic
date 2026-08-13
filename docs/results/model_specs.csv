@@ -1,0 +1,5 @@
+model,params_M,GFLOPs,stride,anchors_640,onnx_fp32_MB,ctx_w8a16_MB,compression,end2end
+v8n-base,3.157,8.86,"[8, 16, 32]",8400,12.27,3.67,3.34,False
+v11n-base,2.624,6.67,"[8, 16, 32]",8400,10.61,3.44,3.09,False
+v26n-base,2.572,6.24,"[8, 16, 32]",8400,9.81,3.38,2.9,True
+v26n-p2,2.662,9.65,"[4, 8, 16, 32]",34000,10.46,,,True
