@@ -12,9 +12,11 @@ proxy and the board disagree by roughly 8×, which section 7 is about.
 | **Our QCS8550 board** | `172.18.50.11:5555`, `product:kalama`, Android 13, QNN v2.45. Physically on the desk. | end-to-end NPU latency, on-device correctness | §5, §7 |
 | **Host, ONNX Runtime CPU** | This laptop, running the QDQ ONNX that AI Hub's quantize job produced. Simulates quantized arithmetic; standard practice for accuracy, and *not* a device measurement. | AP / APs, head-output inspection | §3, §4, §6 |
 
-So: **the accuracy story is simulated on the host, the latency story is
-on-device, and only the w8a8 failure is confirmed in both places** — which is
-the one that matters most, and §7.1 is where it is confirmed on our own board.
+The host simulation is not left on trust: §7.3 re-runs 200 val images through
+the real Hexagon and scores them with the same code, and fp16 lands within
+**1 %** of the host figure. So the ten-condition tables can be quoted as
+representative of the device. The w8a8 failure is confirmed independently in
+all three places.
 
 Job IDs are recorded so each AI Hub row can be reopened; the board rows carry
 the artefact and the harness that produced them.
@@ -254,6 +256,50 @@ budget, **39.84 ms is the number to plan against**, and 5.087 ms is the ceiling
 that a zero-copy integration would be chasing.
 
 Raw rows: `docs/results/onboard_qcs8550.csv`.
+
+### 7.3 AP measured on the Hexagon, not simulated
+
+The accuracy sections above run the QDQ ONNX on the host, which is standard
+practice and still a simulation. The board has no Python and cannot letterbox
+anything — but for an *offline* split it does not need to, because the images
+never change. So 200 val images were letterboxed once on the host, pushed as
+raw tensors (983 MB), executed on the board, and the head outputs pulled back
+and scored with the same decoder, the same NMS and the same AP code as every
+other row (`make_device_inputs.py` → `qnn-net-run` → `eval_device_outputs.py`).
+
+| | AP | AP50 | APs | det/img |
+|---|---:|---:|---:|---:|
+| host fp32 (ONNX Runtime) | 0.1647 | 0.2970 | 0.0902 | 345.5 |
+| **board fp16 (Hexagon)** | **0.1631** | **0.2947** | **0.0889** | 265.7 |
+| Δ | −0.98 % | −0.76 % | −1.44 % | |
+| **board w8a8 (Hexagon)** | **0.0000** | **0.0000** | **0.0000** | **0.0** |
+
+Two things follow.
+
+**The host simulation is validated.** fp16 on real Hexagon silicon lands within
+1 % of the host figure on the same 200 images. The accuracy tables in sections
+3, 4 and 6 can be quoted as representative of the device, which is what makes
+them worth keeping — they cover ten conditions, and pushing 10 × 983 MB to
+measure each one on-device would buy under 1 %.
+
+**The w8a8 failure is now proven at scale on our own hardware.** Across 200
+images the board produced **16,800,000 class scores and every one of them is
+exactly 0.0**. Not "approximately zero", not "too low to threshold" — the
+tensor is identically zero while the box-regression channels of the same
+tensor carry normal values. AP is 0.0000.
+
+One honest wrinkle in the fp16 row: detections per image drop from 345.5 to
+265.7 even though AP barely moves. The cause is fp16 underflow in the low tail
+of the classification head — on one frame, 82,251 of 84,000 class scores are
+exactly zero on the board against 8,582 on the host, and the smallest non-zero
+board value is 1.77e-05 where the host reaches 2.98e-08. The affected scores
+sit far below any usable threshold: at the deployment threshold of 0.25 the
+board finds 135 detections against the host's 137, and the two agree at a
+correlation of 0.9998. It costs AP essentially nothing, but it is the kind of
+difference that makes a device row and a host row disagree on detection counts
+while agreeing on quality, so it is recorded rather than smoothed over.
+
+Raw rows: `docs/results/onboard_accuracy.csv`.
 
 ---
 

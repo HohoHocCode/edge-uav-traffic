@@ -1,0 +1,4 @@
+tag,where,precision,AP,AP50,APs,det_per_image,n_images,split,condition,conf,iou,max_det,ignore_policy,delta_AP_pct,delta_AP50_pct,delta_APs_pct,note
+host-fp32,host ONNX Runtime CPU,fp32,0.164709,0.296956,0.090200,345.51,200,VisDrone2019-DET-val[:200],clean,0.001,0.65,500,mask,,,,reference row for the two below; same 200 images
+board-fp16,QCS8550 board Hexagon (qnn-net-run),fp16,0.163100,0.294700,0.088900,265.70,200,VisDrone2019-DET-val[:200],clean,0.001,0.65,500,mask,-0.98,-0.76,-1.44,AI Hub context binary j5w4kzomg executed on the physical board
+board-w8a8,QCS8550 board Hexagon (qnn-net-run),w8a8,0.000000,0.000000,0.000000,0.00,200,VisDrone2019-DET-val[:200],clean,0.001,0.65,500,mask,-100.00,-100.00,-100.00,"all 16,800,000 class scores across 200 images are exactly 0.0"
