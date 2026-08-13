@@ -1,0 +1,66 @@
+# Host / development environment, managed by uv.
+#
+# This is the source of truth for the *dev machine* (x86 + NVIDIA GPU). The two
+# requirements-*.txt files stay as they are:
+#   requirements-device.txt  the aarch64 board -- no torch, ever
+#   requirements-host.txt    a torch-free host that only exports and benchmarks
+#
+#   uv python install 3.12
+#   uv sync
+#   uv run python 6-showcase/render_all.py
+
+[project]
+name = "skysentry"
+version = "0.1.0"
+description = "UAV traffic-order monitoring on a Qualcomm edge NPU"
+readme = "README.md"
+license = { text = "AGPL-3.0-only" }
+
+# 3.12, not 3.11 or 3.13. Every dependency below ships a stable wheel for it,
+# and the repository's own code (PEP 604 unions under `from __future__ import
+# annotations`) has an effective floor of 3.10.
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python>=4.10",
+    "pyyaml>=6.0",
+    "pandas>=2.0",
+    "tqdm>=4.66",
+
+    # GPU inference path (6-showcase). The CUDA build is selected by the
+    # [tool.uv.sources] block below, not by the version specifier.
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "ultralytics>=8.3",
+    "supervision>=0.25",
+
+    # ONNX export + the CPU/board-parity comparison path.
+    "onnx>=1.15",
+    "onnxslim>=0.1",
+    "onnxruntime>=1.17",
+
+    # 4-bench/report.py has always imported this without declaring it.
+    "matplotlib>=3.7",
+]
+
+# --------------------------------------------------------------------------- #
+# CUDA 12.8 wheels, matching the driver reported by nvidia-smi (572.40).
+#
+# `explicit = true` is load-bearing: without it uv would search this index for
+# every package in the project, and supervision / ultralytics do not exist
+# there. It restricts the index to exactly the packages named in
+# [tool.uv.sources].
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchvision = [{ index = "pytorch-cu128" }]
+
+# The repository is a set of numbered stage directories imported by path
+# injection, not an installable package.
+[tool.uv]
+package = false

@@ -1,5 +1,10 @@
 # Host / development machine (x86 laptop).
 # Needed for exporting the model and running the benchmarks off-device.
+#
+# This file stays torch-free on purpose: it is the minimum needed to export the
+# checkpoint and run the CPU benchmarks. The GPU demo renderers in 6-showcase/
+# need a CUDA build of torch and are managed by uv instead -- see pyproject.toml
+# and run `uv sync`.
 numpy>=1.26
 opencv-python>=4.9          # use opencv-python-headless on a server
 pyyaml>=6.0

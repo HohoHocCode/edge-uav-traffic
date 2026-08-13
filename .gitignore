@@ -8,6 +8,10 @@ venv/
 # Datasets — 78 MB, fetched by scripts/fetch_data.ps1
 data/
 
+# Input footage. Dropped in by hand, ~200 MB a clip: one `git add -A` away from
+# being committed by accident.
+video/
+
 # Run outputs. Must be `results/*` not `results/`: git cannot re-include a file
 # inside an excluded directory, so the .gitkeep would never be tracked.
 results/*
