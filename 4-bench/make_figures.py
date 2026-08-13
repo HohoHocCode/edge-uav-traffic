@@ -185,25 +185,26 @@ def fig_e2e_matrix(root, out):
 # --------------------------------------------------------------------------- #
 def fig_models(root, out):
     """Three architectures on one tiled split, one decoder, one AP code."""
-    rs = rows(os.path.join(root, "results", "tiled_val_full.csv"))
+    rs = rows(os.path.join(root, "results", "tiled_val_4models.csv"))
     name = {"v26n-base-encoder-md500.onnx": "v26n-base",
             "v11n-base-encoder.onnx": "v11n-base",
-            "v8n-base-encoder.onnx": "v8n-base"}
+            "v8n-base-encoder.onnx": "v8n-base",
+            "v26n-p2-encoder.onnx": "v26n-p2"}
     rs = sorted(rs, key=lambda r: -num(r["AP"]))
     labels = [name.get(r["model"], r["model"]) for r in rs]
 
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.6))
     specs = [("AP", "AP (IoU .50:.95)", BLUE),
-             ("APs", "APs — vật thể nhỏ", GREEN),
-             ("ms_per_tile", "ms mỗi ô (CPU host)", PURPLE)]
+             ("AP50", "AP50", ORANGE),
+             ("APs", "APs — vật thể nhỏ", GREEN)]
     for k, (ax, (key, title, col)) in enumerate(zip(axes, specs)):
         vals = [num(r[key]) for r in rs]
         bars = ax.barh(labels[::-1], vals[::-1], color=col, height=.6, zorder=3)
-        best = max(vals) if key != "ms_per_tile" else min(vals)
+        best = max(vals)
         for b, v in zip(bars, vals[::-1]):
             b.set_alpha(1.0 if v == best else .45)
             ax.text(v * 1.02, b.get_y() + b.get_height() / 2,
-                    f"{v:.4f}" if key != "ms_per_tile" else f"{v:.1f}",
+                    f"{v:.4f}",
                     va="center", fontsize=12,
                     fontweight="bold" if v == best else "normal")
         ax.set_title(title, fontsize=13.5)
@@ -302,6 +303,62 @@ def fig_power(root, out):
 
 
 # --------------------------------------------------------------------------- #
+def fig_tradeoff(root, out):
+    """Accuracy against NPU latency, which is the decision the project has to make.
+
+    Both axes come from different machines on purpose: AP is measured here on
+    one tiled split, latency is measured on QCS8550. The host ms/tile column
+    exists in the AP csv and is *not* used -- it moved 25% between runs of the
+    same model, so it cannot carry a latency claim.
+    """
+    nm = {"v26n-p2-encoder.onnx": "v26n-p2",
+          "v26n-base-encoder-md500.onnx": "v26n-base",
+          "v11n-base-encoder.onnx": "v11n-base",
+          "v8n-base-encoder.onnx": "v8n-base"}
+    # w8a16, the only precision that survives on every model (docs/results)
+    lat = {"v8n-base": 3.984, "v11n-base": 4.710,
+           "v26n-base": 4.935, "v26n-p2": 8.531}
+    rs = rows(os.path.join(root, "results", "tiled_val_4models.csv"))
+
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13.2, 5.2))
+    cols = {"v8n-base": BLUE, "v11n-base": ORANGE,
+            "v26n-base": GREEN, "v26n-p2": PURPLE}
+    for ax, key, title in ((a1, "AP", "AP (IoU .50:.95)"),
+                           (a2, "APs", "APs — vật thể nhỏ")):
+        for r in rs:
+            n = nm.get(r["model"], r["model"])
+            x, y = lat[n], num(r[key])
+            ax.scatter(x, y, s=260, color=cols[n], zorder=3,
+                       edgecolor="white", linewidth=2)
+            # v8n va v11n gan nhau ca hai truc, nhan mac dinh se de len nhau
+            dx, dy, ha = (0, 16, "center")
+            if n == "v8n-base":
+                dx, dy, ha = (-14, -4, "right")
+            elif n == "v11n-base":
+                dx, dy, ha = (14, -4, "left")
+            ax.annotate(n, (x, y), xytext=(dx, dy), textcoords="offset points",
+                        ha=ha, va="center" if dy < 8 else "bottom",
+                        fontsize=12, fontweight="bold")
+        ys = [num(r[key]) for r in rs]
+        pad = (max(ys) - min(ys)) * .45 or .01
+        ax.set_ylim(min(ys) - pad, max(ys) + pad * 1.5)
+        ax.set_xlim(2.4, 9.8)
+        ax.set_xlabel("Latency NPU w8a16 (ms/ô)")
+        ax.set_title(title, fontsize=14)
+
+    a1.set_ylabel("AP")
+    fig.suptitle("Đánh đổi: p2 chính xác nhất, và chậm nhất 2.1×",
+                 fontsize=16, fontweight="bold", y=1.0)
+    fig.text(0.5, -0.03, "Trục dọc đo tại chỗ trên 2.192 ô; trục ngang đo trên "
+             "QCS8550 qua AI Hub. Cột ms/ô trên host bị bỏ đi vì nó lệch 25% "
+             "giữa hai lần chạy cùng một model.",
+             ha="center", fontsize=11, color=GREY)
+    p = os.path.join(out, "fig_tradeoff.png")
+    fig.savefig(p); plt.close(fig)
+    return p
+
+
+# --------------------------------------------------------------------------- #
 def fig_budget(root, out):
     """Where a frame's time actually goes once the board is included.
 
@@ -357,7 +414,7 @@ def main() -> int:
     os.makedirs(out, exist_ok=True)
 
     for fn in (fig_quant_trap, fig_e2e_matrix, fig_models, fig_tiling,
-               fig_power, fig_budget):
+               fig_power, fig_budget, fig_tradeoff):
         try:
             p = fn(args.root, out)
             print(f"[ok] {os.path.relpath(p, args.root)}"

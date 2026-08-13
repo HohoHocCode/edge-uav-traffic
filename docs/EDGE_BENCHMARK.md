@@ -46,21 +46,30 @@ twice here, so every model was re-scored locally on one tiled split.
 548 val images → 2 192 tiles (2×2, 20% overlap), conf 0.001, IoU 0.65,
 maxDets 500, ignore regions cut to the tile and masked.
 
-| model | AP | AP50 | APs | ms/tile (host CPU) |
-|---|---:|---:|---:|---:|
-| **v26n-base** | **0.2752** | **0.4631** | **0.1689** | **52.2** |
-| v11n-base | 0.2616 | 0.4381 | 0.1556 | 69.0 |
-| v8n-base | 0.2606 | 0.4405 | 0.1527 | 62.5 |
+| model | AP | AP50 | AP75 | APs | APm |
+|---|---:|---:|---:|---:|---:|
+| **v26n-p2** | **0.2874** | **0.4766** | **0.2925** | **0.1884** | **0.3750** |
+| v26n-base | 0.2752 | 0.4631 | 0.2763 | 0.1689 | 0.3713 |
+| v11n-base | 0.2616 | 0.4381 | 0.2627 | 0.1556 | 0.3667 |
+| v8n-base | 0.2606 | 0.4405 | 0.2597 | 0.1527 | 0.3702 |
 
-v26n-base wins every column: +5.6% AP and +10.6% APs over v8n, at 16% less
-host time — that is the NMS it does not run.
+**p2 wins every column**, and by the largest margin on APs: +23.4% over v8n
+against +10.3% on AP overall. The stride-4 branch does what it exists to do,
+and the gap widens exactly where it should — a result that lands on the metric
+the mechanism predicts is worth more than a result that lands everywhere.
 
-**v8n and v11n are not distinguishable here.** They differ by 0.001 AP, and the
+**v8n and v11n are not distinguishable.** They differ by 0.001 AP, and the
 order is *reversed* against the figures their own Colab runs reported (0.2724
-vs 0.2715 there). The reversal is the evidence: a difference that flips when
-you re-measure it is not a difference.
+vs 0.2715 there). A difference that flips when you re-measure it is not a
+difference.
 
-`docs/results/tiled_val_3models.csv`
+Host `ms/tile` is deliberately absent from this table. It is in the CSV, and it
+moved 25% between two runs of the same model on the same machine (v26n-base
+52.2 → 39.1), so it cannot carry a latency claim. Latency comes from §4.
+
+`docs/results/tiled_val_4models.csv`
+
+![accuracy vs latency](img/fig_tradeoff.png)
 
 ---
 
@@ -279,6 +288,10 @@ exposes three power sources and none of them is instrumentation.
 - **Tiled inference on the board.** §7 blocks the NPU path; the CPU-side cost
   in §5 is measured, the NPU term is not.
 - **Sustained-throttle throughput** (§8).
+- **The four-way comparison at equal training budget.** All four ran 30 epochs
+  (45 for p2, which starts from 40% transferred weights and needs them), but
+  three of the four hit the epoch cap with their best epoch at the end, so
+  these are 30-epoch numbers rather than architecture ceilings.
 - **Energy**, and it will stay unmeasured on this board (§9).
 
 ## Reproducing
