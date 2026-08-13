@@ -34,7 +34,18 @@ import sys
 import time
 
 import numpy as np
-import qai_hub as hub
+
+# qai_hub prints a U+23F3 spinner while it waits. A Windows console defaults to
+# cp1252, which cannot encode it, so the wait raises UnicodeEncodeError and the
+# job -- which is running fine on the service -- looks like a failure. Force the
+# streams to UTF-8 here rather than relying on the caller's environment.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+import qai_hub as hub  # noqa: E402
 
 MATRIX = [
     ("w8a8",   hub.QuantizeDtype.INT8,  hub.QuantizeDtype.INT8),
@@ -50,40 +61,68 @@ def main() -> int:
     ap.add_argument("--calib", required=True)
     ap.add_argument("--tag", required=True)
     ap.add_argument("--device", default="QCS8550 (Proxy)")
-    ap.add_argument("--qairt", default="2.28",
-                    help="pin to the board's runtime; a context binary is not "
-                         "portable across QAIRT versions")
+    ap.add_argument("--qairt", default="2.45",
+                    help="QAIRT version to compile against. A context binary is "
+                         "built for one runtime version and is not portable "
+                         "across them, so this should match the board where "
+                         "possible -- see the check below when it cannot")
     ap.add_argument("--input-name", default="images")
     ap.add_argument("--only", nargs="*", default=None,
                     help="subset of %s" % [m[0] for m in MATRIX])
+    ap.add_argument("--resume", nargs="*", default=None, metavar="NAME=JOBID",
+                    help="reuse quantize jobs already submitted, e.g. "
+                         "w8a8=jpxxwyljp. Quantizing again would repeat a "
+                         "10-minute job for nothing")
     ap.add_argument("--out", default="results/quant_matrix.csv")
     args = ap.parse_args()
 
     device = hub.Device(args.device)
-    calib = np.load(args.calib)
-    print(f"[info] calibration {calib.shape}  {calib.nbytes / 1e6:.0f} MB")
-    print(f"[info] model {args.model}")
-    print(f"[info] device {device.name}, QAIRT pinned to {args.qairt}\n")
-
-    print("[1/4] tai model va calibration len AI Hub ...", flush=True)
-    src = hub.upload_model(args.model)
-    data = hub.upload_dataset({args.input_name: [calib[i:i + 1] for i in
-                                                 range(calib.shape[0])]})
-    print(f"      model {src.model_id}   dataset {data.dataset_id}\n")
-
+    resume = dict(kv.split("=", 1) for kv in (args.resume or []))
     todo = [m for m in MATRIX if not args.only or m[0] in args.only]
+    if resume:
+        todo = [m for m in MATRIX if m[0] in resume]
 
-    # Submit every quantize job before waiting on any of them: they run
-    # concurrently on the service, so serialising the waits would multiply the
-    # wall time by the number of precisions for no reason.
+    # Fail here rather than four compile jobs later. AI Hub only offers a
+    # window of recent QAIRT versions, and the board's runtime can easily sit
+    # below it -- in which case the binary is still worth producing, but its
+    # portability to the device is an open question, not an assumption.
+    avail = sorted({f.api_version for f in hub.get_frameworks()
+                    if "qairt" in f.name.lower()})
+    if args.qairt not in avail:
+        print(f"[fatal] QAIRT {args.qairt} khong co tren AI Hub.")
+        print(f"        Cac ban dung duoc: {', '.join(avail)}")
+        return 2
+
+    print(f"[info] model {args.model}")
+    print(f"[info] device {device.name}, QAIRT {args.qairt} "
+          f"(AI Hub co: {', '.join(avail)})\n")
+
     qjobs = {}
-    print("[2/4] gui cac job quantize ...", flush=True)
-    for name, w, a in todo:
-        j = hub.submit_quantize_job(model=src, calibration_data=data,
-                                    weights_dtype=w, activations_dtype=a,
-                                    name=f"{args.tag}-{name}")
-        qjobs[name] = j
-        print(f"      {name:7s} {j.job_id}")
+    if resume:
+        print("[1/4] dung lai cac job quantize da co ...", flush=True)
+        for name in resume:
+            qjobs[name] = hub.get_job(resume[name])
+            print(f"      {name:7s} {resume[name]}")
+        print()
+    else:
+        calib = np.load(args.calib)
+        print(f"[info] calibration {calib.shape}  {calib.nbytes / 1e6:.0f} MB")
+        print("[1/4] tai model va calibration len AI Hub ...", flush=True)
+        src = hub.upload_model(args.model)
+        data = hub.upload_dataset({args.input_name: [calib[i:i + 1] for i in
+                                                     range(calib.shape[0])]})
+        print(f"      model {src.model_id}   dataset {data.dataset_id}\n")
+
+        # Submit every quantize job before waiting on any of them: they run
+        # concurrently on the service, so serialising the waits would multiply
+        # the wall time by the number of precisions for no reason.
+        print("[2/4] gui cac job quantize ...", flush=True)
+        for name, w, a in todo:
+            j = hub.submit_quantize_job(model=src, calibration_data=data,
+                                        weights_dtype=w, activations_dtype=a,
+                                        name=f"{args.tag}-{name}")
+            qjobs[name] = j
+            print(f"      {name:7s} {j.job_id}")
 
     print("\n[3/4] cho quantize, roi compile + profile ...", flush=True)
     rows = []
