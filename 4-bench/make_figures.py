@@ -72,7 +72,8 @@ def fig_quant_trap(root, out):
     """Latency next to usability. The point is that they disagree."""
     models = [("v8n-base", "quant_matrix_v8n.csv", "quant_check_v8n.csv"),
               ("v11n-base", "quant_matrix_v11n.csv", "quant_check_v11n.csv"),
-              ("v26n end2end", "quant_matrix_v26n.csv", "quant_check_v26n.csv")]
+              ("v26n end2end", "quant_matrix_v26n.csv", "quant_check_v26n.csv"),
+              ("v26n-p2 no-e2e", "quant_matrix_v26n_p2.csv", "quant_check_v26n_p2.csv")]
     prec = ["w8a8", "w8a16", "w16a16", "w4a16"]
 
     # Three states, not two. A binary usable/broken flag calls w4a16 a pass
@@ -97,10 +98,10 @@ def fig_quant_trap(root, out):
     hi = max(v for L in lat.values() for v in L if not np.isnan(v))
     fig, ax = plt.subplots(figsize=(11, 5.4))
     x = np.arange(len(prec))
-    w = 0.26
+    w = 0.21
     for i, (name, _, _) in enumerate(models):
-        off = (i - 1) * w
-        base = [BLUE, ORANGE, GREEN][i]
+        off = (i - 1.5) * w
+        base = [BLUE, ORANGE, GREEN, PURPLE][i]
         for j, (v, st) in enumerate(zip(lat[name], state[name])):
             if np.isnan(v):
                 continue
@@ -126,7 +127,7 @@ def fig_quant_trap(root, out):
     ax.margins(x=0.04)
 
     handles = [Patch(facecolor=c, edgecolor=c, label=n)
-               for (n, _, _), c in zip(models, [BLUE, ORANGE, GREEN])]
+               for (n, _, _), c in zip(models, [BLUE, ORANGE, GREEN, PURPLE])]
     handles.append(Patch(facecolor="white", edgecolor=RED, hatch="///",
                          label="✗ output hỏng hoàn toàn"))
     handles.append(Patch(facecolor=GREY, edgecolor=RED, hatch="..", alpha=.55,

@@ -1,0 +1,4 @@
+box_max,box_min,conf_corr_vs_fp32,conf_max,mean_wh,n_above_thres,n_box_valid,path,precision,usable
+689.391357421875,-44.51092529296875,1.0,0.8744931817054749,22.5x20.4,374,374,v26n-p2-noe2e.onnx,fp32,yes
+694.0568237304688,-40.381492614746094,0.0,0.0,-,0,0,model.onnx,w8a8,NO - conf sap ve 0
+689.6734008789062,-44.45901107788086,0.99815,0.8723219633102417,22.9x20.7,354,354,model.onnx,w8a16,yes

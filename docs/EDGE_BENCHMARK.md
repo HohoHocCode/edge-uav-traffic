@@ -26,7 +26,7 @@ same batch (32), seed (0), epochs (30, or 45 for p2) and no frozen layers.
 | v8n-base | 3.157 M | 8.86 | 8/16/32 | 8 400 | 12.27 MB | 3.67 MB | 3.34× |
 | v11n-base | 2.624 M | 6.67 | 8/16/32 | 8 400 | 10.61 MB | 3.44 MB | 3.09× |
 | v26n-base | 2.572 M | 6.24 | 8/16/32 | 8 400 | 9.81 MB | 3.38 MB | 2.90× |
-| v26n-p2 | 2.662 M | 9.65 | **4**/8/16/32 | **34 000** | 10.46 MB | — | — |
+| v26n-p2 | 2.662 M | 9.65 | **4**/8/16/32 | **34 000** | 10.46 MB | 3.39 MB | 3.09× |
 
 p2 carries the fewest-but-one parameters and the *most* compute: the stride-4
 branch runs at 160×160, so it costs 1.5× the GFLOPs of v26n-base for 3.5% more
@@ -92,12 +92,12 @@ never the constraint.
 
 ### Latency (ms), AI Hub on QCS8550
 
-| | v8n | v11n | v26n e2e | v26n no-e2e |
-|---|---:|---:|---:|---:|
-| w8a8 | 1.992 | 2.315 | 2.525 | 2.439 |
-| **w8a16** | **3.984** | **4.710** | 6.732 | **4.935** |
-| w16a16 | 4.263 | 4.955 | 6.942 | — |
-| w4a16 | 4.062 | 6.319 | 7.644 | — |
+| | v8n | v11n | v26n e2e | v26n no-e2e | v26n-p2 no-e2e |
+|---|---:|---:|---:|---:|---:|
+| w8a8 | 1.992 | 2.315 | 2.525 | 2.439 | 4.288 |
+| **w8a16** | **3.984** | **4.710** | 6.732 | **4.935** | **8.531** |
+| w16a16 | 4.263 | 4.955 | 6.942 | — | — |
+| w4a16 | 4.062 | 6.319 | 7.644 | — | — |
 
 ### Which of those actually work
 
@@ -107,15 +107,22 @@ never the constraint.
 | v11n | ✗ conf→0 | ✓ 237 | ✓ 246 | ⚠ 29/52 |
 | v26n **end2end** | ✗ conf→0 | ✗ **box→point** | ✗ box→point | ✗ box→point |
 | v26n no-e2e | ✗ conf→0 | ✓ 260 | — | — |
+| v26n-p2 no-e2e | ✗ conf→0 | ✓ 354 | — | — |
 
-**Seven of fourteen quantized configurations are unusable, and every one of
-them reports good latency.**
+**Eight of sixteen quantized configurations are unusable, and every one of them
+reports good latency.**
 
-**w8a8 collapses the classification head on all four models** — every class
-score exactly 0.0 while box regression stays healthy. Independent of
-architecture and of export mode. Per-tensor int8 fits one scale to a sigmoid
-that is near-zero almost everywhere with a handful of sharp peaks, and the
-peaks do not survive.
+**w8a8 collapses the classification head on all five** model/export
+combinations — every class score exactly 0.0 while box regression stays
+healthy. Five for five, across three architectures and both export modes, is
+what makes this a property of the detect head rather than of any one model.
+Per-tensor int8 fits one scale to a sigmoid that is near-zero almost everywhere
+with a handful of sharp peaks, and the peaks do not survive it.
+
+**p2 is the slowest quantized model by a wide margin** — 8.531 ms against v8n's
+3.984 — because its stride-4 branch quadruples the anchor count to 34 000. Its
+parameter count (2.662 M, second smallest) predicts the opposite of its latency
+ranking, which is the same lesson as §1 seen from the other end.
 
 **w4a16 degrades without failing, which is worse.** v11n keeps 29 valid boxes
 against fp32's 244, confidence correlation falls to 0.726, and mean box size
@@ -272,8 +279,6 @@ exposes three power sources and none of them is instrumentation.
 - **Tiled inference on the board.** §7 blocks the NPU path; the CPU-side cost
   in §5 is measured, the NPU term is not.
 - **Sustained-throttle throughput** (§8).
-- **v26n-p2 quantized.** Its 34 000 anchors change the assigner arithmetic and
-  the head cost; the fp32 accuracy row is in §2.
 - **Energy**, and it will stay unmeasured on this board (§9).
 
 ## Reproducing

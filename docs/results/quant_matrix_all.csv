@@ -17,3 +17,6 @@ v26n-base,end2end (decode TRONG graph),w4a16,7644,101.7,433,433,0,2,0,0.0,0.0x0.
 v26n-base,anchor (export tat end2end),fp32,,,,,,264,264,1.0,26.4x21.5,1.0,yes,,,,,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
 v26n-base,anchor (export tat end2end),w8a8,2439,100.0,395,395,0,0,0,0.0,-,0.0,NO - conf sap ve 0,j5w4j993g,jp36ym4np,jpv7jw1rp,2.45,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
 v26n-base,anchor (export tat end2end),w8a16,4935,101.4,395,395,0,260,260,0.985,26.4x21.5,0.99919,yes,jp16r8885,jpym9d70p,jp06nr60p,2.45,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
+v26n-p2,anchor (export tat end2end),fp32,,,,,,374,374,1.0,22.5x20.4,1.0,yes,,,,,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
+v26n-p2,anchor (export tat end2end),w8a8,4288,102.0,489,489,0,0,0,0.0,-,0.0,NO - conf sap ve 0,jprwzo3e5,jgzn182kg,jp43zmkv5,2.45,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
+v26n-p2,anchor (export tat end2end),w8a16,8531,102.6,490,490,0,354,354,0.947,22.9x20.7,0.99815,yes,jp06nd0ep,j5w4j8l4g,jgd2j8d65,2.45,"QCS8550 (Proxy) - AI Hub cloud, NOT the lab board","tile 2x2 ov0.20, 64 anh, sha f62e17d4e7cd9946"
