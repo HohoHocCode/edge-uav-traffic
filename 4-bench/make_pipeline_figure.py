@@ -63,7 +63,7 @@ def main() -> int:
 
     b = json.load(open(os.path.join(args.root, "results", "board",
                                     "board_cpu_cold.json")))
-    npu_ms = 3.984                       # v8n w8a16 on AI Hub QCS8550
+    npu_ms = 4.93                        # YOLO26 w8a16 on AI Hub QCS8550
     pre_ms = b["pre_ms"]
     post_ms = b["post_ms"]
     tiles = 4
@@ -77,7 +77,7 @@ def main() -> int:
         ("Preprocess",    pre_ms * tiles, "letterbox, CHW",  ORANGE, None),
         ("NPU  w8a16",    npu_ms * tiles, "Hexagon V73",     BLUE,   None),
         ("Decode + NMS",  post_ms * tiles, "Kryo CPU",       ORANGE, None),
-        ("Tracker",       None,          "ByteTrack",        GREEN,  1.45),
+        ("Tracker",       None,          "BoT-SORT",         GREEN,  1.45),
         ("Telemetry",     None,          "counts, alerts",   GREEN,  1.7),
     ]
 
