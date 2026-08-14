@@ -1,0 +1,25 @@
+# BoT-SORT with a longer lost-track buffer.
+#
+# 30 frames is 1.0 s at 30 fps. A vehicle passing under a tree or behind a
+# building in this footage is gone longer than that, and a track retired one
+# frame too early can only come back as a new identity -- which IDF1 charges for
+# every remaining frame of that object's life.
+#
+# The cost is the mirror image: a track kept alive for 2 s keeps competing for
+# detections it has no business claiming, so the failure mode flips from
+# fragmentation to mis-assignment. IDSW going *up* while IDF1 also goes up is
+# the expected shape if 60 is the better trade here.
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 60          # <-- the only change against botsort.yaml
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False
+model: auto

@@ -43,10 +43,11 @@ class Timing:
     pre_ms: float = 0.0
     infer_ms: float = 0.0
     post_ms: float = 0.0
+    track_ms: float = 0.0
 
     @property
     def total_ms(self) -> float:
-        return self.pre_ms + self.infer_ms + self.post_ms
+        return self.pre_ms + self.infer_ms + self.post_ms + self.track_ms
 
     @property
     def fps(self) -> float:
@@ -147,6 +148,8 @@ class UltralyticsEngine:
         self.iou = float(iou)
         self.max_det = int(max_det)
         self.batch = int(batch)
+        self._gmc_hooked = False
+        self._last_warp = None
 
         names = getattr(self.model, "names", None) or {}
         self.class_names = {int(k): str(v) for k, v in names.items()}
@@ -227,6 +230,100 @@ class UltralyticsEngine:
                 inf += wall_ms - acc
             timings.append(Timing(pre, inf, post))
         return dets, timings
+
+    # ------------------------------------------------------------------ #
+    def _hook_gmc(self) -> None:
+        """Record the camera warp the tracker computes, instead of recomputing it.
+
+        BoT-SORT, Deep OC-SORT and TrackTrack already run sparse optical flow
+        every frame and warp their Kalman state with the result. The renderer
+        needs the same transform for its trails, and there are two ways to get
+        it: estimate it again with ``gmc.GlobalMotion`` (~3 ms/frame, and a
+        second estimate that can disagree with the tracker's), or read back the
+        one that was just used. This reads it back -- free, and guaranteed to be
+        the transform the identities were actually associated with.
+
+        ``GMC.apply`` returns a 2x3 affine mapping previous-frame coordinates to
+        current-frame coordinates, with translation already rescaled out of its
+        internal downscale, so it can be applied to full-resolution points as
+        is. Trackers without camera compensation (ByteTrack, plain OC-SORT) have
+        no ``gmc`` attribute; there is nothing to hook and ``last_warp`` stays
+        None, which the caller reads as "no compensation available".
+        """
+        if self._gmc_hooked:
+            return
+        predictor = getattr(self.model, "predictor", None)
+        trackers = getattr(predictor, "trackers", None) or []
+        if not trackers:
+            return                      # nothing built yet; try again next frame
+
+        self._gmc_hooked = True
+        gmc = getattr(trackers[0], "gmc", None)
+        if gmc is None or getattr(gmc, "method", None) in (None, "none"):
+            return
+
+        inner = gmc.apply
+
+        def recording_apply(*a, **kw):
+            warp = inner(*a, **kw)
+            self._last_warp = warp
+            return warp
+
+        gmc.apply = recording_apply
+
+    @property
+    def last_warp(self):
+        """The most recent camera warp, or None if the tracker computes none."""
+        return self._last_warp
+
+    def track_frame(self, frame: np.ndarray, tracker: str) -> tuple[sv.Detections, Timing]:
+        """Detect and track one frame using Ultralytics' persistent tracker.
+
+        Tracking is deliberately frame-sequential. ``persist=True`` tells
+        Ultralytics that consecutive calls belong to the same video; batching
+        independent frames through a stateful MOT tracker would make ordering
+        implicit and fragile.
+        """
+        # Cleared per frame, never carried over: Ultralytics falls back to an
+        # identity warp if optical flow throws, and reusing the previous frame's
+        # transform would compensate for motion that did not happen.
+        self._last_warp = None
+
+        t0 = time.perf_counter()
+        results = self.model.track(
+            frame,
+            persist=True,
+            tracker=tracker,
+            imgsz=self.imgsz,
+            conf=self.conf,
+            iou=self.iou,
+            max_det=self.max_det,
+            device=self.device,
+            quantize=16 if self.half else None,
+            verbose=False,
+        )
+        if self.device != "cpu":
+            self._torch.cuda.synchronize()
+        wall_ms = (time.perf_counter() - t0) * 1000.0
+        if len(results) != 1:
+            raise RuntimeError(f"tracker returned {len(results)} results for one frame")
+
+        self._hook_gmc()
+
+        result = results[0]
+        sp = getattr(result, "speed", None) or {}
+        pre = float(sp.get("preprocess", 0.0))
+        inf = float(sp.get("inference", 0.0))
+        post = float(sp.get("postprocess", 0.0))
+        measured = pre + inf + post
+        if measured <= 0.0:
+            inf, track = wall_ms, 0.0
+        else:
+            # Ultralytics profiles detector stages, but tracker callbacks and
+            # Python dispatch sit outside that split. Keep this overhead visible
+            # rather than incorrectly charging it to model inference.
+            track = max(0.0, wall_ms - measured)
+        return sv.Detections.from_ultralytics(result), Timing(pre, inf, post, track)
 
 
 # --------------------------------------------------------------------------- #

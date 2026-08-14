@@ -1,0 +1,25 @@
+# BoT-SORT with appearance re-identification on.
+#
+# The cheapest escape from IoU-only association: with model "auto" Ultralytics
+# registers a forward pre-hook on the Detect layer of the torch weights and
+# reuses features the detector already computed, so no second network runs.
+#
+# The open question this row settles is whether those features carry usable
+# identity at VisDrone object sizes. Most boxes here are well under 32x32 px,
+# and an embedding pooled from a 15x15 crop may be closer to noise than to an
+# appearance signature -- in which case appearance_thresh lets it through and
+# identities get *worse*, not better. Measured, not assumed.
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: sparseOptFlow
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: True           # <-- the only change against botsort.yaml
+model: auto

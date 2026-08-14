@@ -1,4 +1,4 @@
-"""Glue between supervision's detection container and the repository's tracker.
+"""Small adapters between detection, tracking, analytics, and drawing.
 
 **Why not ``sv.ByteTrack``.** supervision deprecated it in 0.28 and removes it in
 0.31; the installed 0.30 emits a FutureWarning on construction. Writing new code
@@ -18,8 +18,10 @@ supervision keeps the jobs it is best at here: ``sv.Detections`` as the
 detection container, ``from_ultralytics`` to fill it, the annotators behind
 ``--no-fast-draw``, and ``ColorPalette``.
 
-What is left for this module is the detection->tracker handoff and the tracker
-health statistics Task 4 reports.
+Task 4 now uses Ultralytics' maintained trackers directly. The repository
+tracker adapters remain here for Task 5, whose analytics consumes its native
+``Track`` objects. The Task 4 helpers below only read tracker ids returned by
+Ultralytics; they do not perform association or motion prediction.
 """
 
 from __future__ import annotations
@@ -88,24 +90,42 @@ class TrackStats:
     def __init__(self) -> None:
         self._first_seen: dict[int, int] = {}
         self._prev_ids: set[int] = set()
+        self._history: dict[int, list[tuple[float, float]]] = {}
         self.unique_total = 0
         self.n_new = 0
         self.n_lost = 0
 
     def update(self, tracks, frame_id: int) -> None:
-        live = {int(t.track_id) for t in tracks}
+        ids = np.asarray([t.track_id for t in tracks], dtype=np.int64)
+        boxes = np.asarray([t.box for t in tracks], dtype=np.float32).reshape(-1, 4)
+        self.update_arrays(ids, boxes, frame_id)
+
+    def update_arrays(
+        self, ids: np.ndarray, xyxy: np.ndarray, frame_id: int
+    ) -> None:
+        """Update display statistics from tracker outputs, without tracking."""
+        live = {int(tid) for tid in ids}
         self.n_new = len(live - self._prev_ids)
         self.n_lost = len(self._prev_ids - live)
         for tid in live - self._prev_ids:
             if tid not in self._first_seen:
                 self._first_seen[tid] = frame_id
                 self.unique_total += 1
+
+        for tid, box in zip(ids, xyxy):
+            key = int(tid)
+            x1, y1, x2, y2 = map(float, box)
+            history = self._history.setdefault(key, [])
+            history.append(((x1 + x2) * 0.5, (y1 + y2) * 0.5))
+            if len(history) > 120:
+                del history[:-120]
         self._prev_ids = live
 
         # A retired id will never be looked up again; dropping it keeps the dict
         # bounded over a long run.
         if len(self._first_seen) > 100_000:
             self._first_seen = {t: self._first_seen[t] for t in live}
+            self._history = {t: self._history[t] for t in live if t in self._history}
 
     def age_histogram(self, frame_id: int) -> dict[str, int]:
         buckets = {"1_5": 0, "6_15": 0, "16_30": 0, "31_60": 0, "60p": 0}
@@ -130,6 +150,64 @@ class TrackStats:
             frame_id - self._first_seen.get(t, frame_id) + 1 for t in self._prev_ids
         ]))
 
+    def warp_history(self, A: np.ndarray) -> float:
+        """Carry every stored trail point into the current frame's coordinates.
+
+        Call once per frame, *before* ``update_arrays`` appends this frame's
+        centroids, so the whole trail and the new point share one coordinate
+        frame.
+
+        Two separate things are wrong without this, and both read as tracker
+        failure when the tracker is innocent:
+
+        * A car driving straight renders as a curve bent by the drone's flight
+          path, because the older points of its trail are pinned to screen
+          positions that no longer line up with this frame.
+        * ``traces`` gates on end-to-end displacement to avoid scribbling on
+          parked cars -- but measured on screen, a *stationary* object drifts a
+          median 208 px over a 60-frame window on this footage (measured on
+          video/uav0000076_00241_s_30fps, mean 271 px, p95 826 px). 99.7% of
+          windows clear the 8 px gate, so the filter passes everything and every
+          parked car gets a trail. Compensated, a stationary object's trail
+          collapses to a few px of Kalman jitter and the gate works as intended.
+
+        ``A`` is the 2x3 affine that maps previous-frame coordinates to this
+        frame's, as returned by Ultralytics' ``GMC.apply``. Returns the camera
+        translation in px, for the on-screen readout.
+        """
+        A = np.asarray(A, dtype=np.float32)
+        M, t = A[:, :2], A[:, 2]
+
+        # One matmul for every trail in the frame, not one per track. At 22
+        # tracks x 120 points a per-track loop with a Python tuple rebuild
+        # measured 1.9 ms/frame; batched, with tolist() doing the conversion in
+        # C, it is a fraction of that -- and this runs on every frame of the
+        # render, where draw and encode are already the budget.
+        keys = [tid for tid, pts in self._history.items() if pts]
+        if not keys:
+            return float(np.hypot(t[0], t[1]))
+
+        lengths = [len(self._history[tid]) for tid in keys]
+        flat = np.concatenate([
+            np.asarray(self._history[tid], dtype=np.float32) for tid in keys
+        ])
+        flat = flat @ M.T + t
+        for tid, chunk in zip(keys, np.split(flat, np.cumsum(lengths[:-1]))):
+            self._history[tid] = chunk.tolist()
+        return float(np.hypot(t[0], t[1]))
+
+    def traces(self, max_len: int = 60, min_travel: float = 8.0) -> dict[int, list]:
+        """Return visible trails for currently active ids."""
+        out: dict[int, list] = {}
+        for tid in self._prev_ids:
+            points = self._history.get(tid, [])[-max_len:]
+            if len(points) < 2:
+                continue
+            (x0, y0), (x1, y1) = points[0], points[-1]
+            if (x1 - x0) ** 2 + (y1 - y0) ** 2 >= min_travel ** 2:
+                out[tid] = points
+        return out
+
 
 # --------------------------------------------------------------------------- #
 def track_arrays(tracks) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -141,6 +219,26 @@ def track_arrays(tracks) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ids = np.asarray([t.track_id for t in tracks], dtype=np.int64)
     cls = np.asarray([t.cls for t in tracks], dtype=np.int64)
     return xyxy, ids, cls
+
+
+def tracking_arrays(dets) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Ultralytics-tracked ``sv.Detections`` -> boxes, ids, classes.
+
+    Detections that have not yet been accepted by the tracker have no id and
+    are intentionally omitted from a tracking render.
+    """
+    ids = getattr(dets, "tracker_id", None)
+    if len(dets) == 0 or ids is None:
+        return (np.zeros((0, 4), np.float32), np.zeros((0,), np.int64),
+                np.zeros((0,), np.int64))
+    ids = np.asarray(ids, dtype=np.int64).reshape(-1)
+    keep = ids >= 0
+    xyxy = np.asarray(dets.xyxy, dtype=np.float32).reshape(-1, 4)[keep]
+    cls = (
+        np.asarray(dets.class_id, dtype=np.int64).reshape(-1)[keep]
+        if dets.class_id is not None else np.zeros(int(keep.sum()), np.int64)
+    )
+    return xyxy, ids[keep], cls
 
 
 def traces_of(tracks, max_len: int = 60, min_travel: float = 8.0) -> dict[int, list]:

@@ -118,17 +118,22 @@ def load_split(root: str, limit: int | None = None) -> list[Sample]:
     return samples
 
 
-def filter_ignored(
-    boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray,
-    ignore_boxes: np.ndarray, overlap_thresh: float = 0.5,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Drop detections that sit mostly inside an ignored region.
+def keep_mask(
+    boxes: np.ndarray, ignore_boxes: np.ndarray, overlap_thresh: float = 0.5,
+) -> np.ndarray:
+    """Which boxes survive the ignore regions. ``True`` = keep.
 
     Uses intersection-over-*detection-area*, not IoU: a small detection fully
     inside a large ignored region has a tiny IoU but should still be dropped.
+
+    Exposed separately from :func:`filter_ignored` because the MOT benchmark
+    carries a track id alongside each box and must apply the same rule to it.
+    One definition of the rule, two callers.
     """
-    if boxes.shape[0] == 0 or ignore_boxes.shape[0] == 0:
-        return boxes, scores, classes
+    if boxes.shape[0] == 0:
+        return np.zeros((0,), bool)
+    if ignore_boxes.shape[0] == 0:
+        return np.ones((boxes.shape[0],), bool)
 
     d_area = np.maximum(0.0, boxes[:, 2] - boxes[:, 0]) * \
              np.maximum(0.0, boxes[:, 3] - boxes[:, 1])
@@ -138,7 +143,17 @@ def filter_ignored(
     inter = wh[..., 0] * wh[..., 1]
     frac = inter.max(axis=1) / np.maximum(d_area, 1e-9)
 
-    keep = frac < overlap_thresh
+    return frac < overlap_thresh
+
+
+def filter_ignored(
+    boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray,
+    ignore_boxes: np.ndarray, overlap_thresh: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Drop detections that sit mostly inside an ignored region."""
+    if boxes.shape[0] == 0 or ignore_boxes.shape[0] == 0:
+        return boxes, scores, classes
+    keep = keep_mask(boxes, ignore_boxes, overlap_thresh)
     return boxes[keep], scores[keep], classes[keep]
 
 

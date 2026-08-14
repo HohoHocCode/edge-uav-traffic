@@ -107,27 +107,43 @@ class DetectionEvaluator:
             # matched[t, d] = 1 tp, 0 fp, -1 ignore
             matched = np.zeros((len(IOU_THRS), pb.shape[0]), dtype=np.int8)
 
-            for ti, thr in enumerate(IOU_THRS):
-                gt_taken = np.zeros(gb.shape[0], dtype=bool)
+            if gb.shape[0] == 0:
+                d_area = _box_area(pb)
+                matched[:, :] = np.where(
+                    (d_area >= lo) & (d_area < hi), 0, -1
+                )[None, :]
+            else:
+                # The original implementation looped over ten thresholds and
+                # every detection in Python.  VID has millions of hypotheses,
+                # making that correct reference implementation need hours.
+                # Keep the greedy detection order but associate all thresholds
+                # together: one Python iteration per detection, with the ten
+                # threshold states carried in a small vector.
+                n_thr = len(IOU_THRS)
+                gt_taken = np.zeros((n_thr, gb.shape[0]), dtype=bool)
+                threshold_rows = np.arange(n_thr)
+                d_area = _box_area(pb)
+                outside_value = np.where(
+                    (d_area >= lo) & (d_area < hi), 0, -1
+                ).astype(np.int8)
+
                 for di in range(pb.shape[0]):
-                    if gb.shape[0] == 0:
-                        matched[ti, di] = 0
-                        continue
-                    cand = ious[di].copy()
-                    cand[gt_taken] = -1.0
-                    gi = int(np.argmax(cand)) if cand.size else -1
-                    if gi < 0 or cand[gi] < thr:
-                        # Unmatched detection. It is a false positive only if
-                        # it lies inside the evaluated area range; otherwise it
-                        # belongs to a different area bucket's tally.
-                        d_area = _box_area(pb[di:di + 1])[0]
-                        matched[ti, di] = 0 if (lo <= d_area < hi) else -1
-                    elif in_rng[gi]:
-                        gt_taken[gi] = True
-                        matched[ti, di] = 1
-                    else:
-                        gt_taken[gi] = True
-                        matched[ti, di] = -1     # matched an out-of-range GT
+                    candidates = np.broadcast_to(
+                        ious[di], (n_thr, gb.shape[0])
+                    ).copy()
+                    candidates[gt_taken] = -1.0
+                    best_gt = np.argmax(candidates, axis=1)
+                    best_iou = candidates[threshold_rows, best_gt]
+                    accepted = best_iou >= IOU_THRS
+
+                    matched[:, di] = outside_value[di]
+                    if accepted.any():
+                        accepted_rows = threshold_rows[accepted]
+                        accepted_gt = best_gt[accepted]
+                        matched[accepted_rows, di] = np.where(
+                            in_rng[accepted_gt], 1, -1
+                        )
+                        gt_taken[accepted_rows, accepted_gt] = True
 
             scores_all.append(ps)
             match_all.append(matched)

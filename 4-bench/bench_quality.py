@@ -40,7 +40,10 @@ sys.path.insert(0, os.path.join(ROOT, "2-augment"))
 import cv2  # noqa: E402
 
 import degradations as D  # noqa: E402
-from detector import Yolov8Detector  # noqa: E402
+from benchmark_detector import (  # noqa: E402
+    create_benchmark_detector,
+    warmup_benchmark_detector,
+)
 from metrics import DetectionEvaluator  # noqa: E402
 from runtime import create_session  # noqa: E402
 from visdrone_data import CLASS_NAMES, filter_ignored, load_split  # noqa: E402
@@ -55,7 +58,7 @@ def sha256_short(path: str, n: int = 16) -> str:
 
 
 def run_condition(
-    det: Yolov8Detector,
+    det,
     samples,
     condition: str,
     ignore_policy: str,
@@ -122,6 +125,11 @@ def main() -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--data", default=os.path.join(ROOT, "data", "VisDrone2019-DET-val"))
     ap.add_argument("--backend", default="auto")
+    ap.add_argument("--device", default="0",
+                    help="CUDA index or cpu; used when --model is a .pt")
+    ap.add_argument("--half", action="store_true", default=True,
+                    help="fp16 for .pt CUDA inference (default: on)")
+    ap.add_argument("--no-half", dest="half", action="store_false")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--conf", type=float, default=0.001,
                     help="low for AP; raise only for a deployment-threshold row")
@@ -151,12 +159,16 @@ def main() -> int:
     samples = load_split(args.data, limit=args.limit or None)
     print(f"[info] {len(samples)} images from {args.data}")
 
-    session = create_session(args.model, backend=args.backend)
-    det = Yolov8Detector(session, imgsz=args.imgsz, conf_thres=args.conf,
-                         iou_thres=args.iou, max_det=args.max_det)
-    det.warmup(n=5)
-    print(f"[info] backend={session.backend_name} "
-          f"providers={session.info.providers_active}")
+    det, backend_name, providers_active, class_names = create_benchmark_detector(
+        args.model, args.backend, args.imgsz, args.conf, args.iou, args.max_det,
+        device=args.device, half=args.half,
+    )
+    if class_names and list(class_names.values()) != CLASS_NAMES:
+        raise SystemExit(
+            f"[fatal] checkpoint class order differs from VisDrone: {class_names}"
+        )
+    warmup_benchmark_detector(det, samples[0].image_path, n=5)
+    print(f"[info] backend={backend_name} providers={providers_active}")
 
     model_hash = sha256_short(args.model)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -165,7 +177,6 @@ def main() -> int:
     clean_ref: dict | None = None
     for cond in conditions:
         print(f"[run] condition={cond}")
-        session.reset_timers()
         r = run_condition(det, samples, cond, args.ignore_policy)
 
         if cond == "clean":
@@ -179,7 +190,7 @@ def main() -> int:
         r.update({
             "model": os.path.basename(args.model),
             "model_sha256_16": model_hash,
-            "backend": session.backend_name,
+            "backend": backend_name,
             "imgsz": args.imgsz,
             "conf_thres": args.conf,
             "iou_thres": args.iou,

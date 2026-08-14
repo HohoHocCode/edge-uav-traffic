@@ -1,0 +1,35 @@
+# Deep OC-SORT with the two features its shipped default leaves off.
+#
+# ultralytics/cfg/trackers/deepocsort.yaml defaults to gmc_method: none and
+# with_reid: False, which makes plain `--tracker deepocsort` OC-SORT with extra
+# code paths and *less* camera compensation than BoT-SORT. Comparing that
+# against BoT-SORT would answer a question nobody asked.
+#
+# With both on, this is a strict superset of BoT-SORT's cues -- Kalman + IoU +
+# GMC + appearance -- plus OC-SORT's two additions:
+#   * OCM, a velocity-direction consistency term in the cost (inertia), and
+#   * ORU, which re-runs the filter along a virtual trajectory when a lost track
+#     is recovered, instead of leaving the drift baked in.
+#
+# delta_t: 3 measures velocity direction over 3 frames (0.1 s at 30 fps). Left
+# at the default deliberately: on this footage GMC already removes the camera
+# component, and shortening the window would make the direction estimate track
+# detection jitter instead of vehicle heading.
+tracker_type: deepocsort
+track_high_thresh: 0.3
+track_low_thresh: 0.1
+new_track_thresh: 0.3
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+delta_t: 3
+inertia: 0.2
+use_byte: False
+
+gmc_method: sparseOptFlow   # <-- default is none
+with_reid: True             # <-- default is False
+model: auto
+proximity_thresh: 0.5
+appearance_thresh: 0.9
+alpha_fixed_emb: 0.95

@@ -116,6 +116,10 @@ class TelemetrySink:
             ),
         )
         self.conn.commit()
+        #: Dashboard task the overlay should follow ("2"/"4"/"5"), refreshed
+        #: from each /ingest reply. Plain attribute assignment on a str is
+        #: atomic under the GIL, so the render loop reads it without a lock.
+        self.view = "4"
         self._db_lock = threading.Lock()
         self._uncommitted = 0
         self._last_commit = time.time()
@@ -143,9 +147,18 @@ class TelemetrySink:
             self._thread.start()
 
     # ------------------------------------------------------------------ #
-    def write(self, report, timings: dict) -> None:
+    def write(self, report, timings: dict, extra: dict | None = None) -> None:
+        """Append one frame. ``extra`` carries non-timing scalars.
+
+        It exists so a caller can record something the analytics report cannot
+        know -- the raw detection count, for instance, which is measured before
+        the tracker runs and is therefore not a property of the tracked report.
+        Unlike ``timings`` these are not coerced to rounded floats.
+        """
         row = report.to_row()
         row.update({k: round(float(v), 3) for k, v in timings.items()})
+        if extra:
+            row.update(extra)
         row["session_id"] = self.session_id
 
         if self._csv_file is not None:
@@ -263,8 +276,19 @@ class TelemetrySink:
         )
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
-                resp.read()
+                body = resp.read()
             self.posted += len(batch)
+            # The command post answers with the task the operator is looking
+            # at, so the board can draw the matching overlay. Riding on a reply
+            # the node already waits for costs no extra connection and no
+            # polling; the price is that a tab change only takes effect on the
+            # next flush, i.e. within post_interval_s.
+            try:
+                view = json.loads(body).get("view")
+            except (TypeError, ValueError, AttributeError):
+                view = None
+            if view in ("2", "4", "5"):
+                self.view = view
         except (urllib.error.URLError, OSError, TimeoutError):
             self.post_failures += 1   # offline is an expected state, not an error
 

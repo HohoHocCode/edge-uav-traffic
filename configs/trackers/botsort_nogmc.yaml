@@ -1,0 +1,21 @@
+# BoT-SORT with camera-motion compensation switched off.
+#
+# The control for the GMC question. Measured on video/uav0000076_00241_s_30fps
+# the camera translates a mean of 5.34 px/frame, p95 15.0 px, max 54 px, for a
+# cumulative path of 8332 px -- 4.4x the frame width. If that matters to
+# association, this row must lose IDF1 against the botsort baseline. If it does
+# not lose, the compensation is costing time for nothing on this dataset.
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True
+
+gmc_method: none          # <-- the only change against botsort.yaml
+
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+with_reid: False
+model: auto
