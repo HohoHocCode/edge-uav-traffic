@@ -1,0 +1,36 @@
+{
+  "model": "v26n-p2",
+  "mAP50-95": 0.2821057596585765,
+  "mAP50": 0.46912245925191554,
+  "mAP75": 0.28677506163792355,
+  "ap_per_class": {
+    "pedestrian": 0.26800255503547005,
+    "people": 0.17342207808743046,
+    "bicycle": 0.1030987478410256,
+    "car": 0.6020474971009435,
+    "van": 0.3582974346409965,
+    "truck": 0.27249874517517225,
+    "tricycle": 0.18987363793817383,
+    "awning-tricycle": 0.12666974921928417,
+    "bus": 0.4572460109737623,
+    "motor": 0.26990114057350617
+  },
+  "params_M": 2.662,
+  "anchors": 34000,
+  "end2end_no_nms": true,
+  "max_det": 500,
+  "weights_transferred": "360/902",
+  "transfer_frac": 0.3991,
+  "epochs": 45,
+  "batch": 32,
+  "imgsz": 640,
+  "seed": 0,
+  "nc": 10,
+  "output_shape_expected": [
+    1,
+    500,
+    6
+  ],
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "ultralytics": "8.4.118"
+}

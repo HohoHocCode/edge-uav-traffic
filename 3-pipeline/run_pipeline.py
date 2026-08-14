@@ -94,6 +94,10 @@ def parse_args(argv=None):
     p.add_argument("--imgsz", type=int, default=None)
     p.add_argument("--conf", type=float, default=None)
     p.add_argument("--max-frames", type=int, default=0, help="0 = until the source ends")
+    p.add_argument("--loop", action="store_true",
+                   help="when a file/URL source ends, reopen it and keep going "
+                        "(seamless continuous demo; servers and counters stay "
+                        "up). Ignored for a live camera index.")
     p.add_argument("--post-url", default=None)
     p.add_argument("--save-video", default=None)
     p.add_argument("--headless", action="store_true", help="never open a window")
@@ -110,7 +114,84 @@ def parse_args(argv=None):
     p.add_argument("--mjpeg-width", type=int, default=0,
                    help="downscale the streamed frame only (0 = as rendered). "
                         "Useful over a weak uplink; does not affect detection")
+    p.add_argument("--speed", type=float, default=1.0,
+                   help="advance the source faster than one frame per step, by "
+                        "dropping the frames in between (1.5 = play 1.5x). It "
+                        "cannot make the pipeline faster -- the pipeline is "
+                        "already going flat out -- it makes the clip cover more "
+                        "ground per second of wall clock. Ignored for a live "
+                        "camera, where there is nothing to skip ahead to.")
+    p.add_argument("--threads", type=int, default=0,
+                   help="ORT intra-op threads; 0 leaves the ORT default. On a "
+                        "big.LITTLE SoC the default (one per core) is a trap: "
+                        "the slow cores hold the fast ones back. Measured on "
+                        "QCS8550, v26n at 640: 1 thread 113 ms, 3 threads "
+                        "65 ms, 6 threads 81 ms.")
     return p.parse_args(argv)
+
+
+#: What to draw on the frame for each dashboard task. The board renders one
+#: video, so the view has to follow whichever task the operator is looking at;
+#: drawing all of it at once is what made the three tabs look identical.
+#:
+#:   2 detection  boxes + class + confidence. No ids: identity is not this
+#:                task's subject and a "#41" beside every box is noise.
+#:   4 tracking   boxes + class + id + motion trail. No confidence, no ROI.
+#:   5 counting   boxes + the counting line captioned with its own tally.
+#:                Ids and trails off so the line is the loudest thing present.
+OVERLAY_VIEWS = {
+    "2": {"id": False, "trail": False, "conf": True,  "rois": True,  "counts": False},
+    "4": {"id": True,  "trail": True,  "conf": False, "rois": False, "counts": False},
+    "5": {"id": False, "trail": False, "conf": False, "rois": False, "counts": True},
+}
+
+
+def frame_stats(dets, tracks, tracker, prev_issued: int) -> tuple[dict, int]:
+    """Per-frame numbers the analytics report cannot produce, by task.
+
+    The dashboard shows three views -- detection, tracking, counting -- and
+    they can only be as different from each other as the telemetry behind
+    them. ``vehicle_count`` and ``n_tracks`` describe all three equally badly,
+    so each task gets the quantity it is actually judged on.
+
+    task 2  conf_mean / conf_min say how sure the detector was, which
+            ``n_dets`` alone cannot; a frame with 9 detections at 0.26 is not
+            the same result as 9 at 0.81.
+
+    task 4  identity churn. ``n_tracks`` is blind to the failure that matters
+            most in tracking: a tracker that discards an object and reissues a
+            fresh id for it every few frames reports a perfectly steady track
+            count while producing useless trajectories. ``n_new`` (ids minted
+            this frame) against the number of objects present is the cheap
+            proxy for that, and needs no ground truth.
+    """
+    conf = getattr(dets, "conf", None)
+    n_dets = int(len(dets.xyxy))
+    stats = {
+        "n_dets": n_dets,
+        "conf_mean": round(float(conf.mean()), 4) if n_dets else 0.0,
+        "conf_min": round(float(conf.min()), 4) if n_dets else 0.0,
+    }
+
+    if tracker is None:
+        # Detections passed straight through as pseudo-tracks: there are no
+        # identities to churn, so reporting zeros here would look like a
+        # perfectly stable tracker rather than the absence of one.
+        stats.update({"n_new": 0, "n_lost": 0, "n_tentative": 0,
+                      "ids_issued": 0, "track_age_mean": 0.0})
+        return stats, prev_issued
+
+    from tracker import Track
+    issued = int(Track._next_id) - 1
+    ages = [t.age for t in tracks]
+    stats.update({
+        "n_new": max(0, issued - prev_issued),
+        "n_lost": sum(1 for t in tracker.tracks if t.state == "lost"),
+        "n_tentative": sum(1 for t in tracker.tracks if t.state == "tentative"),
+        "ids_issued": issued,
+        "track_age_mean": round(sum(ages) / len(ages), 2) if ages else 0.0,
+    })
+    return stats, issued
 
 
 def main(argv=None) -> int:
@@ -127,11 +208,14 @@ def main(argv=None) -> int:
 
     if not os.path.exists(model_path):
         print(f"[fatal] model not found: {model_path}\n"
-              f"        run 1-model/export_onnx.py first.", file=sys.stderr)
+              f"        weights are not in git (10 MB each). See which ones\n"
+              f"        are on this machine with: run_demo.py --list",
+              file=sys.stderr)
         return 2
 
     # ---- detector -----------------------------------------------------
-    session = create_session(model_path, backend=backend)
+    session = create_session(model_path, backend=backend,
+                             intra_threads=args.threads or None)
     det = Yolov8Detector(
         session, imgsz=imgsz, conf_thres=conf_thres,
         iou_thres=float(mcfg["iou_thres"]), max_det=int(mcfg["max_det"]),
@@ -160,7 +244,17 @@ def main(argv=None) -> int:
     # ---- degradation (robustness demo) --------------------------------
     degrade_fn = None
     if args.degrade:
-        import degradations as D
+        try:
+            import degradations as D
+        except ImportError:
+            # 2-augment/ lives on the research branch: it is what the
+            # robustness experiments need, not what the demo runs. Say so
+            # rather than surfacing a bare ImportError for a missing folder.
+            print("[fatal] --degrade can 2-augment/degradations.py, khong co "
+                  "trong cay demo.\n"
+                  "        lay bang: git checkout research -- 2-augment",
+                  file=sys.stderr)
+            return 2
         if args.degrade not in D.CONDITION_IDS:
             print(f"[fatal] unknown condition {args.degrade!r}; "
                   f"known: {D.CONDITION_IDS}", file=sys.stderr)
@@ -257,13 +351,45 @@ def main(argv=None) -> int:
     t_start = time.perf_counter()
     totals: list[float] = []
     last_level = "normal"
+    prev_issued = 0                 # ids minted so far, for the churn metric
+
+    # --speed, as a fractional debt of frames to throw away after each one we
+    # keep. A live camera index is excluded: there is no "ahead" to skip to,
+    # and dropping its frames would only discard the present.
+    speed_skip = max(0.0, args.speed - 1.0) if not isinstance(source, int) else 0.0
+    skip_debt = 0.0
+    if speed_skip:
+        print(f"[info] speed x{args.speed:g}: bo {speed_skip:.2f} khung sau moi "
+              f"khung xu ly (tracking va dem se doi theo)")
 
     try:
         while True:
             loop_start = time.perf_counter()
             ok, frame = cap.read()
             if not ok:
+                # A file/URL that ended: reopen and keep the demo running,
+                # without tearing down the MJPEG server, telemetry sink or
+                # tracker. A live camera index cannot be "reopened" to rewind,
+                # so looping is only meaningful for a finite source.
+                if args.loop and not isinstance(source, int):
+                    cap.release()
+                    cap = open_capture(source)
+                    if cap.isOpened():
+                        continue
+                    print("[warn] --loop could not reopen the source; stopping",
+                          file=sys.stderr)
                 break
+
+            # Move the read head past the frames --speed says to skip. grab()
+            # advances without converting to BGR, so a skipped frame costs a
+            # decode but not a colour conversion or an allocation.
+            if speed_skip:
+                skip_debt += speed_skip
+                while skip_debt >= 1.0:
+                    if not cap.grab():
+                        break
+                    skip_debt -= 1.0
+
             if resize_to:
                 frame = cv2.resize(frame, (src_w, src_h), interpolation=cv2.INTER_AREA)
             if degrade_fn is not None:
@@ -291,7 +417,8 @@ def main(argv=None) -> int:
             totals.append(timings["total_ms"])
 
             if sink is not None:
-                sink.write(report, timings)
+                stats, prev_issued = frame_stats(dets, tracks, tracker, prev_issued)
+                sink.write(report, timings, stats)
                 if report.congestion_level != last_level:
                     sink.event(
                         frame_id,
@@ -308,9 +435,21 @@ def main(argv=None) -> int:
             if ocfg.get("enabled", True) and (
                 writer is not None or show_window or streamer is not None
             ):
-                viz.draw_regions(frame, ana.rois, ana.lines)
+                # The dashboard's selected task rides back on the /ingest
+                # response, so this costs no extra connection and no polling.
+                # Offline (no sink, or no reply yet) it falls back to tracking.
+                v = OVERLAY_VIEWS.get(
+                    getattr(sink, "view", "4"), OVERLAY_VIEWS["4"])
+                viz.draw_regions(
+                    frame, ana.rois, ana.lines,
+                    show_rois=v["rois"],
+                    counts=report.line_crossings if v["counts"] else None,
+                )
                 viz.draw_tracks(
-                    frame, tracks, class_names, show_id=ocfg.get("show_track_id", True)
+                    frame, tracks, class_names,
+                    show_id=v["id"] and ocfg.get("show_track_id", True),
+                    show_trail=v["trail"],
+                    show_conf=v["conf"],
                 )
                 viz.draw_hud(
                     frame, report, timings, session.backend_name, condition=args.degrade

@@ -1,13 +1,22 @@
 # On-device (aarch64 Qualcomm Linux / Ubuntu).
 # Deliberately small: no torch, no ultralytics, nothing that needs a compiler.
-numpy>=1.24
-opencv-python-headless>=4.9
+# Upper bounds are deliberate. Without a ceiling the aarch64 resolver picks
+# numpy 2.x and OpenCV 5.x, both of which break APIs this project uses.
+numpy>=1.24,<2
+opencv-python-headless>=4.9,<5
 pyyaml>=6.0
 
 # CPU baseline. Install this first and confirm the pipeline runs at all.
 onnxruntime>=1.17
 
-# NPU path. Provides QNNExecutionProvider; needs the QAIRT libraries present
-# on the device (libQnnHtp.so and friends) and reachable via LD_LIBRARY_PATH.
-# Installing this REPLACES plain onnxruntime -- do not install both.
-#   pip3 install onnxruntime-qnn
+# NPU path. onnxruntime-qnn does NOT ship a Linux aarch64 wheel -- checked
+# against manylinux2014/2_17/2_28_aarch64 on cp310 and PyPI has no matching
+# distribution. It is a Windows-only package, so QNNExecutionProvider is not
+# reachable from this board and the pip line that used to live here was a
+# dead end. Use the native QAIRT tooling instead:
+#   /opt/qcom/qirp-sdk/bin/aarch64-ubuntu-gcc9.4/qnn-net-run
+#   /opt/qcom/qirp-sdk/bin/aarch64-ubuntu-gcc9.4/qnn-context-binary-generator
+# with LD_LIBRARY_PATH=/opt/qcom/qirp-sdk/lib/aarch64-oe-linux-gcc11.2 and the
+# v73 DSP skels (this board is QCS_KALAMAP, soc_id 603).
+# Conversion and quantization are x86_64-only: run them on a host, then copy
+# the context binary over.

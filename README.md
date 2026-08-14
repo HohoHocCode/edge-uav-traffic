@@ -32,10 +32,15 @@ repository is measured on the device rather than on a laptop.
 | Task 4 — multi-object tracking | ByteTrack + Kalman, dependency-free | `3-pipeline/tracker.py` |
 | Task 5 — crowd / vehicle counting | per-frame, per-ROI, per-class counting | `3-pipeline/analytics.py` |
 
-The device pipeline above is the deployable half. `6-showcase/` is the other
-one: the same model run on a GPU host over real VisDrone footage, producing an
-annotated video per task plus the per-frame CSV/JSON a dashboard can read.
-See [Showcase renders](#showcase-renders-tasks-2--4--5).
+The device pipeline above is the deployable half, and it is what this branch
+carries. The experimental half — benchmarks, quantization, degradations, GPU
+renders — lives on the `research` branch; see
+[Repository layout](#repository-layout).
+
+> **Commands below that begin with `1-model/`, `2-augment/`, `4-bench/`,
+> `6-showcase/` or `notebooks/` need that branch:** `git checkout research`.
+> The results they produced are quoted here because they are what the claims
+> rest on, but the code that produced them is not in this tree.
 
 On top of the tasks: directional line-crossing counts, a congestion level with
 hysteresis, an offline-first telemetry store, and a command-post dashboard.
@@ -223,20 +228,50 @@ and removes 22.6 duplicate detections per image.
 
 ## Repository layout
 
-The directory names are the pipeline.
+The directory names are the pipeline. This branch carries the deployable half
+only — what is needed to run the demo on the board and watch it from a
+dashboard:
 
 ```
+run_demo.py   the one entry point: --version sample | realtime
 0-setup/      find the board, deploy to it, probe its capabilities
-1-model/      export to ONNX, build the PTQ calibration set
-2-augment/    deterministic weather / exposure / blur degradations
 3-pipeline/   detector -> tracker -> analytics -> telemetry -> overlay
               + tiled_detector.py: overlapping-crop inference and merge
-4-bench/      latency ladder, robustness table, tiling A/B, on-device eval
 5-server/     command post: ingest API + dashboard
-6-showcase/   GPU renders of the three video tasks, + the data a dashboard reads
-notebooks/    Colab: weather finetune, and the 4-architecture two-stage study
-scripts/      dataset fetch, demo clip synthesis
 configs/      every value that changes a reported number
+models/       per-model summary.json / export.json / args.yaml / results.csv
+              (weights are 10 MB each and are not in git — see below)
+scripts/      dataset fetch, demo clip synthesis
+```
+
+### The `research` branch
+
+The experimental half is on `research` and is kept out of this tree on
+purpose: it is large, it is not needed to run anything, and mixing it in makes
+the deployable code harder to read.
+
+```
+1-model/          export to ONNX, build the PTQ calibration set
+2-augment/        deterministic weather / exposure / blur degradations
+4-bench/          latency ladder, robustness table, tiling A/B, MOT scoring
+6-showcase/       GPU renders of the three video tasks
+configs/trackers/ one-change-per-file BoT-SORT / OC-SORT ablations
+notebooks/        Colab: weather finetune, 4-architecture two-stage study
+```
+
+```bash
+git checkout research            # everything above
+git checkout research -- 4-bench # or just one layer, into this tree
+```
+
+Weights are in neither branch. `.pt` and `.onnx` run 5–17 MB apiece and are
+reproducible from the training notebook, so committing them would have added
+121 MB of binaries that no diff can review. What *is* committed is each
+model's `summary.json`, `export.json`, `args.yaml` and `results.csv` — about
+10 KB per model, and the part the numbers in this README rest on.
+
+```bash
+python run_demo.py --list        # which models are on this machine, with mAP
 ```
 
 Documents, in the order they became true:

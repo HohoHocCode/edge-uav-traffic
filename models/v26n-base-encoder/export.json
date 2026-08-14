@@ -1,0 +1,23 @@
+{
+  "model": "v26n-base",
+  "onnx_sha256_16": "84a15c34328bd2d7",
+  "pt_sha256_16": "2cee2f69e8f9397a",
+  "input_shape": [
+    1,
+    3,
+    640,
+    640
+  ],
+  "output_shape": [
+    1,
+    300,
+    6
+  ],
+  "end2end_no_nms": true,
+  "max_det": 500,
+  "opset": 13,
+  "imgsz": 640,
+  "nc": 10,
+  "value_info_dupes_removed": 1,
+  "pipeline_compatible": false
+}

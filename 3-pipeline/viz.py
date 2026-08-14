@@ -34,7 +34,16 @@ def draw_tracks(
     class_names: dict[int, str],
     show_id: bool = True,
     show_trail: bool = True,
+    show_conf: bool = False,
 ) -> np.ndarray:
+    """Draw one box per track.
+
+    The flags exist so the same frame can answer three different questions.
+    Showing everything at once is the wrong default for a demo: an id beside
+    every box is noise when the question is "what did the detector find", and
+    a confidence beside every box is noise when the question is "did the
+    identities hold".
+    """
     for t in tracks:
         x1, y1, x2, y2 = (int(v) for v in t.box)
         c = colour_for(t.cls)
@@ -43,6 +52,8 @@ def draw_tracks(
         label = class_names.get(int(t.cls), str(t.cls))
         if show_id:
             label = f"{label} #{t.track_id}"
+        if show_conf:
+            label = f"{label} {float(t.conf):.2f}"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
         # Keep the label inside the frame when the box touches the top edge.
         ly = y1 - 4 if y1 - th - 6 >= 0 else y2 + th + 6
@@ -56,20 +67,40 @@ def draw_tracks(
     return frame
 
 
-def draw_regions(frame: np.ndarray, rois, lines) -> np.ndarray:
+def draw_regions(frame: np.ndarray, rois, lines, show_rois: bool = True,
+                 counts: dict | None = None) -> np.ndarray:
+    """ROI boxes and counting lines.
+
+    ``counts`` is the analytics ``line_crossings`` mapping. When given, the
+    line is drawn thicker and captioned with its own tally, which is the whole
+    point of the counting view: the number belongs next to the line it came
+    from, not only in a panel on the far side of the screen.
+    """
     h, w = frame.shape[:2]
-    for r in rois:
-        if r.name == "full_frame":
-            continue
-        x1, y1, x2, y2 = r.box
-        cv2.rectangle(frame, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
-                      (200, 200, 200), 1, cv2.LINE_AA)
-        cv2.putText(frame, r.name, (int(x1 * w) + 4, int(y1 * h) + 14),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1, cv2.LINE_AA)
+    if show_rois:
+        for r in rois:
+            if r.name == "full_frame":
+                continue
+            x1, y1, x2, y2 = r.box
+            cv2.rectangle(frame, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
+                          (200, 200, 200), 1, cv2.LINE_AA)
+            cv2.putText(frame, r.name, (int(x1 * w) + 4, int(y1 * h) + 14),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1, cv2.LINE_AA)
     for ln in lines:
         x1, y1, x2, y2 = ln.seg
-        cv2.line(frame, (int(x1 * w), int(y1 * h)), (int(x2 * w), int(y2 * h)),
-                 (255, 230, 120), 2, cv2.LINE_AA)
+        p1 = (int(x1 * w), int(y1 * h))
+        p2 = (int(x2 * w), int(y2 * h))
+        thick = 3 if counts else 2
+        cv2.line(frame, p1, p2, (255, 230, 120), thick, cv2.LINE_AA)
+        if counts:
+            d = counts.get(ln.name, {})
+            txt = f"{ln.name}  {d.get('forward', 0)} -> / <- {d.get('backward', 0)}"
+            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            ox, oy = p1[0], max(th + 8, p1[1] - 10)
+            cv2.rectangle(frame, (ox - 4, oy - th - 6), (ox + tw + 6, oy + 6),
+                          (30, 30, 30), -1)
+            cv2.putText(frame, txt, (ox, oy), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                        (255, 230, 120), 2, cv2.LINE_AA)
     return frame
 
 
